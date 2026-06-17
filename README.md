@@ -130,6 +130,19 @@ For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`,
 - Optimize article content extraction, add support for more sites
 - ~~Support for GitHub README fetching~~ (already supported)
 
+## MCP Client Setup
+
+For detailed step-by-step guidance on connecting this MCP server to **Codex CLI** and **Claude Code**, see the dedicated setup guide:
+
+📄 **[MCP-SETUP-GUIDE.md](./MCP-SETUP-GUIDE.md)**
+
+Covers:
+- Adding the server to Codex CLI via `config.toml`
+- Adding the server to Claude Code via `claude mcp add` (HTTP transport)
+- JSON configuration for `.mcp.json` and `~/.claude.json`
+- Available tools and parameters reference
+- Configuration comparison between Codex CLI and Claude Code
+
 ## Installation Guide
 
 If you are using `open-websearch` as an MCP server, continue with the MCP-oriented setup below.
