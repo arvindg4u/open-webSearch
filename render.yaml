@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: open-websearch
+    runtime: node
+    repo: https://github.com/arvindg4u/open-webSearch.git
+    branch: main
+    buildCommand: npm install && npm run build
+    startCommand: node build/index.js
+    envVars:
+      - key: MODE
+        value: http
+      - key: ENABLE_CORS
+        value: "true"
+      - key: CORS_ORIGIN
+        value: '*'
+      - key: DEFAULT_SEARCH_ENGINE
+        value: duckduckgo
