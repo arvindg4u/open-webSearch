@@ -258,6 +258,18 @@ async function main() {
     });
 
     // Read the port number from the environment variable; use the default port 3000 if it is not set.
+
+    // Keep-alive endpoint to prevent free tier spin-down
+    app.get("/keepalive", (req, res) => {
+      const auth = req.headers.authorization;
+      const token = process.env.KEEPALIVE_TOKEN;
+      if (token && (!auth || auth !== `Bearer ${token}`)) {
+        res.status(401).json({ error: "unauthorized" });
+        return;
+      }
+      res.json({ ok: true, time: new Date().toISOString() });
+    });
+
     const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
     app.listen(PORT, '0.0.0.0', () => {
