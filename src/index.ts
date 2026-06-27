@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { setupTools } from './tools/setupTools.js';
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import express from 'express';
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
 import cors from 'cors';
 import type { CorsOptions } from 'cors';
@@ -22,7 +20,6 @@ type StreamableSession = {
 
 type SseSession = {
   server: McpServer;
-  transport: SSEServerTransport;
   closed: boolean;
 };
 
@@ -92,174 +89,46 @@ async function main() {
   // Only set up HTTP server if enabled
   if (config.enableHttpServer) {
     console.error('🔌 Starting HTTP server...');
-    // 创建 Express 应用
     const app = express();
-    app.use(express.json());
+    app.use(express.json({ limit: '1mb' }));
 
     const mcpCorsOptions: CorsOptions = {
       origin: config.corsOrigin || '*',
-      methods: ['GET', 'POST', 'DELETE'],
+      methods: ['GET', 'POST'],
       allowedHeaders: ['Content-Type', 'Mcp-Session-Id'],
       exposedHeaders: ['Mcp-Session-Id'],
     };
 
-    // 是否启用跨域
     if (config.enableCors) {
       app.use(cors(mcpCorsOptions));
       app.options('*', cors(mcpCorsOptions));
     }
 
-    // Store transports for each session type
-    const transports = {
-      streamable: {} as Record<string, StreamableSession>,
-      sse: {} as Record<string, SseSession>
-    };
+    // Create one server + transport for the process lifetime.
+    // The transport handles sessions internally across requests.
+    const mcpServer = createServer(runtime);
+    const mcpTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+    });
+    await mcpServer.connect(mcpTransport);
 
-    // Handle POST requests for client-to-server communication
     app.post('/mcp', async (req, res) => {
-      // Check for existing session ID
-      const sessionId = req.headers['mcp-session-id'] as string | undefined;
-      let transport: StreamableHTTPServerTransport;
-
-      if (sessionId && transports.streamable[sessionId]) {
-        // Reuse existing transport
-        transport = transports.streamable[sessionId].transport;
-      } else if (!sessionId && isInitializeRequest(req.body)) {
-        // New initialization request
-        const server = createServer(runtime);
-        const session = {} as StreamableSession;
-
-        transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
-          onsessioninitialized: (sessionId) => {
-            // Store the transport by session ID
-            transports.streamable[sessionId] = session;
-          },
-          // DNS rebinding protection is disabled by default for backwards compatibility. If you are running this server
-          // locally, make sure to set:
-          // enableDnsRebindingProtection: true,
-          // allowedHosts: ['127.0.0.1'],
-        });
-
-        session.server = server;
-        session.transport = transport;
-        session.closed = false;
-
-        // Clean up transport when closed
-        transport.onclose = () => {
-          if (transport.sessionId && transports.streamable[transport.sessionId] === session) {
-            delete transports.streamable[transport.sessionId];
-          }
-
-          if (session.closed) {
-            return;
-          }
-
-          session.closed = true;
-          void server.close().catch(error => {
-            console.error('❌ Failed to close streamable MCP server:', error);
-          });
-        };
-
-        // Connect to the MCP server
-        try {
-          await server.connect(transport);
-        } catch (error) {
-          session.closed = true;
-          void server.close().catch(closeError => {
-            console.error('❌ Failed to close streamable MCP server after connect error:', closeError);
-          });
-          throw error;
-        }
-      } else {
-        // Invalid request
-        res.status(400).json({
-          jsonrpc: '2.0',
-          error: {
-            code: -32000,
-            message: 'Bad Request: No valid session ID provided',
-          },
-          id: null,
-        });
-        return;
-      }
-
-      // Handle the request
-      await transport.handleRequest(req, res, req.body);
-    });
-
-    // Reusable handler for GET and DELETE requests
-    const handleSessionRequest = async (req: express.Request, res: express.Response) => {
-      const sessionId = req.headers['mcp-session-id'] as string | undefined;
-      if (!sessionId || !transports.streamable[sessionId]) {
-        res.status(400).send('Invalid or missing session ID');
-        return;
-      }
-
-      const transport = transports.streamable[sessionId];
-      await transport.transport.handleRequest(req, res);
-    };
-
-    // Handle GET requests for server-to-client notifications via SSE
-    app.get('/mcp', handleSessionRequest);
-
-    // Handle DELETE requests for session termination
-    app.delete('/mcp', handleSessionRequest);
-
-    // Legacy SSE endpoint for older clients
-    app.get('/sse', async (req, res) => {
-      // Create SSE transport for legacy clients
-      const transport = new SSEServerTransport('/messages', res);
-      const server = createServer(runtime);
-      const session: SseSession = {
-        server,
-        transport,
-        closed: false
-      };
-
-      transports.sse[transport.sessionId] = session;
-
-      transport.onclose = () => {
-        if (transports.sse[transport.sessionId] === session) {
-          delete transports.sse[transport.sessionId];
-        }
-
-        if (session.closed) {
-          return;
-        }
-
-        session.closed = true;
-        void server.close().catch(error => {
-          console.error('❌ Failed to close SSE MCP server:', error);
-        });
-      };
-
       try {
-        await server.connect(transport);
+        await mcpTransport.handleRequest(req, res, req.body);
       } catch (error) {
-        delete transports.sse[transport.sessionId];
-        session.closed = true;
-        void server.close().catch(closeError => {
-          console.error('❌ Failed to close SSE MCP server after connect error:', closeError);
-        });
-        throw error;
+        console.error('❌ MCP handler error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: String(error) },
+            id: null,
+          });
+        }
       }
     });
 
-    // Legacy message endpoint for older clients
-    app.post('/messages', async (req, res) => {
-      const sessionId = req.query.sessionId as string;
-      const session = transports.sse[sessionId];
-      if (session) {
-        await session.transport.handlePostMessage(req, res, req.body);
-      } else {
-        res.status(400).send('No transport found for sessionId');
-      }
-    });
+    app.get('/mcp', (_req, res) => res.status(200).send('ok'));
 
-    // Read the port number from the environment variable; use the default port 3000 if it is not set.
-
-    // Keep-alive endpoint to prevent free tier spin-down
     app.get("/keepalive", (req, res) => {
       const auth = req.headers.authorization;
       const token = process.env.KEEPALIVE_TOKEN;
