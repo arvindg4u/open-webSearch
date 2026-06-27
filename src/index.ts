@@ -104,17 +104,38 @@ async function main() {
       app.options('*', cors(mcpCorsOptions));
     }
 
-    // Create one server + transport for the process lifetime.
-    // The transport handles sessions internally across requests.
-    const mcpServer = createServer(runtime);
-    const mcpTransport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-    });
-    await mcpServer.connect(mcpTransport);
+    // Per-session transport storage
+    const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
 
     app.post('/mcp', async (req, res) => {
       try {
-        await mcpTransport.handleRequest(req, res, req.body);
+        const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+        if (sessionId && sessions.has(sessionId)) {
+          // Resume existing session
+          const session = sessions.get(sessionId)!;
+          await session.transport.handleRequest(req, res, req.body);
+          return;
+        }
+
+        // New session — create server + transport
+        const server = createServer(runtime);
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (sid) => {
+            sessions.set(sid, { server, transport });
+          },
+        });
+
+        transport.onclose = () => {
+          if (transport.sessionId) {
+            sessions.delete(transport.sessionId);
+          }
+          void server.close().catch(() => {});
+        };
+
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
       } catch (error) {
         console.error('❌ MCP handler error:', error);
         if (!res.headersSent) {
@@ -127,6 +148,7 @@ async function main() {
       }
     });
 
+    // Health check
     app.get('/mcp', (_req, res) => res.status(200).send('ok'));
 
     app.get("/keepalive", (req, res) => {
