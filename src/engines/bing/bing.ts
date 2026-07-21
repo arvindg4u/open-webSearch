@@ -26,13 +26,12 @@ const SEARCH_SUBMIT_SELECTORS = [
     '#sb_form_go',
     'button[type="submit"]',
     'input[type="submit"]',
-    'button[aria-label="搜索"]',
     'button[aria-label="Search"]'
 ];
 const FALLBACK_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
     'Upgrade-Insecure-Requests': '1'
@@ -44,10 +43,7 @@ const BOT_DETECTION_KEYWORDS = [
     'access denied',
     'blocked',
     'rate limit',
-    'too many requests',
-    '请验证',
-    '验证码',
-    '人机验证'
+    'too many requests'
 ];
 const BROWSER_CONTEXT_OPTIONS = {
     userAgent: BROWSER_USER_AGENT,
@@ -80,14 +76,21 @@ function buildBingSearchUrl(query: string, pageNumber: number): string {
 }
 
 function analyzeBlockedPage(html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
-    const normalized = html.toLowerCase();
     const $ = cheerio.load(html);
     const title = $('title').first().text().trim().toLowerCase();
-    const detectedKeywords = BOT_DETECTION_KEYWORDS.filter((keyword) => normalized.includes(keyword));
+
+    // Only scan visible body text to avoid false positives from
+    // third-party script/service URLs (e.g., ssl.kaptcha.com) in Bing's HTML.
+    const $body = $('body');
+    $body.find('script, style, link, meta, noscript, svg').remove();
+    const bodyText = ($body.text() || '').toLowerCase();
+
+    const detectedKeywords = BOT_DETECTION_KEYWORDS.filter((keyword) => bodyText.includes(keyword));
     const resultSelector = '#b_results .b_algo, #b_results li.b_algo, .b_algo, .b_ans';
     const hasStructuredResults = $(resultSelector).length > 0;
     const hasParsedResults = parseBingSearchResults(html, 1).length > 0;
-    const hasResults = hasStructuredResults || hasParsedResults;
+    const hasResultsContainer = $('#b_results').length > 0;
+    const hasResults = hasStructuredResults || hasParsedResults || hasResultsContainer;
     const hasCaptchaUi = $([
         'iframe[src*="captcha"]',
         '[id*="captcha"]',
@@ -101,10 +104,7 @@ function analyzeBlockedPage(html: string): { blocked: boolean; hasResults: boole
         'captcha',
         'verify you are human',
         'access denied',
-        'too many requests',
-        '验证码',
-        '人机验证',
-        '请验证'
+        'too many requests'
     ].some((keyword) => title.includes(keyword));
     const blocked = !hasResults && (hasCaptchaUi || hasStrongTitleSignal || detectedKeywords.length >= 2);
 
