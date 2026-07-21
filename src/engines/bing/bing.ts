@@ -6,8 +6,8 @@ import { parseBingSearchResults } from './parser.js';
 import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
 
-const BING_BASE_URL = 'https://cn.bing.com/search';
-const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
+const BING_BASE_URL = 'https://www.bing.com/search';
+const BING_HOME_URL = 'https://www.bing.com/?mkt=en-US';
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const SEARCH_INPUT_SELECTORS = [
     'input[name="q"]',
@@ -51,7 +51,7 @@ const BOT_DETECTION_KEYWORDS = [
 ];
 const BROWSER_CONTEXT_OPTIONS = {
     userAgent: BROWSER_USER_AGENT,
-    locale: 'zh-CN',
+    locale: 'en-US',
     viewport: { width: 1920, height: 1080 },
     deviceScaleFactor: 1,
     colorScheme: 'light'
@@ -73,7 +73,7 @@ export function shouldSuggestRemovingSiteOperator(query: string, error: unknown)
 function buildBingSearchUrl(query: string, pageNumber: number): string {
     const url = new URL(BING_BASE_URL);
     url.searchParams.set('q', query);
-    url.searchParams.set('setlang', 'zh-CN');
+    url.searchParams.set('setlang', 'en-US');
     url.searchParams.set('ensearch', '0');
     url.searchParams.set('first', String(1 + pageNumber * 10));
     return url.toString();
@@ -178,7 +178,6 @@ function buildDefaultBrowserLaunchArgs(hideWindow: boolean): string[] {
 }
 
 function buildWindowsBrowserLaunchArgs(hideWindow: boolean): string[] {
-    // 修复 Windows/Edge 有头浏览器连续提示“不受支持的命令行标志”的问题：Windows 路径使用 allowlist，避免把 Linux/root 或跨站安全绕过类参数带到用户可见浏览器窗口里。
     const args = [
         '--no-first-run'
     ];
@@ -216,7 +215,7 @@ async function setupAntiDetection(page: any): Promise<void> {
             get: () => 'MacIntel'
         });
         Object.defineProperty(navigator, 'languages', {
-            get: () => ['zh-CN', 'zh', 'en-US', 'en']
+            get: () => ['en-US', 'en']
         });
         Object.defineProperty(navigator, 'hardwareConcurrency', {
             get: () => 8
@@ -369,7 +368,7 @@ async function preparePlaywrightPage(page: any): Promise<void> {
         await page.setViewportSize(BROWSER_CONTEXT_OPTIONS.viewport).catch(() => undefined);
     }
     await page.setExtraHTTPHeaders({
-        'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
+        'Accept-Language': 'en-US,en;q=0.9'
     });
 }
 
@@ -557,11 +556,7 @@ async function openBingAndSearch(page: any, query: string): Promise<void> {
     let searchInput = canReuseCurrentBingPage ? await findBingSearchInput(page) : null;
     const previousUrl = page.url();
 
-    // 只有当前页本身就是 Bing 时才复用它的搜索框；否则先回到 Bing 首页，避免把查询输进站内弹窗或第三方页面控件。
-    // 对已经停留在 Bing 结果页的情况，仍然优先复用当前页搜索框，避免每次都重新打开首页。
     if (!searchInput) {
-        // 修复 hidden-headed 冷启动并发搜索时，Bing 首页少量子资源迟迟不触发 load，导致可用搜索框已经出现但 page.goto 仍超时的问题。
-        // 搜索流程只依赖 DOM 和搜索框，改为 domcontentloaded 后再显式等待搜索框，避免把资源加载慢误判为搜索失败。
         await page.goto(BING_HOME_URL, {
             waitUntil: 'domcontentloaded',
             timeout: Math.max(config.playwrightNavigationTimeoutMs, 30000)
@@ -584,9 +579,6 @@ async function openBingAndSearch(page: any, query: string): Promise<void> {
     }
     await waitForBingSearchInputValue(page, query);
 
-    // 解决复用 Bing 结果页搜索框时，旧结果页上的提交动作没有稳定触发新查询的问题。
-    // 这里坚持留在当前 Bing 结果页，用同一个搜索框发起下一次查询；只有当 q 参数真正切到新查询后，
-    // 才允许进入结果解析。
     await submitBingSearchFromCurrentPage(page, searchInput, previousUrl, query);
     await waitForBingResultsReady(page);
 }
@@ -712,8 +704,6 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
             poolKey: 'bing-search',
             contextOptions: BROWSER_CONTEXT_OPTIONS,
             preparePage: preparePlaywrightPage,
-            // 对 Bing 的真实交互流程，这里改成 false 后会稳定复现搜索页等待超时与查询被建议词改写的问题，
-            // 说明当前实现仍需要复用 connectOverCDP 暴露出来的现有 context 来保持搜索链路稳定。
             preferExistingContext: true
         });
 
