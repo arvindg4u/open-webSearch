@@ -180,8 +180,11 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
 | `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
 | `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | Disable TLS certificate verification for `fetchWebContent` only. Use only when a target site has a broken certificate chain |
-| `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
-| `PORT` | `3000`                  | 1-65535 | Server port |
+| `MODE` | `stdio`                 | `stdio`, `http`, `both` | Server mode. Unset means STDIO only - a stdio client never opens a listening socket. Set `MODE=http` or `MODE=both` to serve MCP clients over HTTP |
+| `HOST` | `127.0.0.1`             | an address | HTTP MCP bind address. Loopback by default; the HTTP surface has no auth |
+| `PORT` | `3000`                  | 1-65535 | HTTP MCP port (`/mcp`). Distinct from `OPEN_WEBSEARCH_DAEMON_PORT` (the REST daemon) |
+| `OPEN_WEBSEARCH_MCP_SESSION_IDLE_TIMEOUT_MS` | `300000` | ms | Evict an idle HTTP MCP session after this long |
+| `OPEN_WEBSEARCH_MCP_MAX_SESSIONS` | `64` | integer | Cap concurrent HTTP MCP sessions; evicts least-recently-used |
 | `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
 | `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | Search strategy. Currently only affects Bing: request only, request then Playwright fallback, or force Playwright |
 | `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | Which Playwright client package to resolve when browser mode is enabled |

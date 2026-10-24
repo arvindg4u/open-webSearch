@@ -1,0 +1,65 @@
+# Run ONE shared open-websearch MCP server for every agentic CLI on this host.
+#
+# Why one instance: configured as a stdio MCP server, each CLI session spawns
+# its own process tree (npm exec -> sh -> node) and those trees are not reaped
+# when the session ends. A single long-lived HTTP instance makes the process
+# count O(1) instead of O(sessions).
+#
+# The CLIs need the MCP HTTP surface at /mcp, which is the `MODE=http` server -
+# NOT `open-websearch serve` (that starts the separate local REST daemon on
+# OPEN_WEBSEARCH_DAEMON_PORT, used by scripts and the CLI, not by MCP clients).
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/open-websearch.service ~/.config/systemd/user/
+#   # edit WorkingDirectory/ExecStart if the repo is not at ~/open-websearch
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now open-websearch.service
+#   loginctl enable-linger "$USER"   # keep it running without a login session
+#
+# Verify:
+#   systemctl --user status open-websearch
+#   curl --noproxy '*' http://127.0.0.1:3000/mcp     # -> ok
+#
+# Then point each CLI at http://127.0.0.1:3000/mcp (see MCP-SETUP-GUIDE.md).
+
+[Unit]
+Description=open-websearch MCP server (shared HTTP instance)
+Documentation=https://github.com/Aas-ee/open-webSearch
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/open-websearch
+
+# MODE=http     - serve the MCP HTTP transport; no stdio transport
+# HOST=127.0.0.1 - loopback only; this server has NO authentication
+# PORT=3000     - the MCP HTTP port (distinct from the REST daemon's 3210)
+#
+# Do NOT set HOST=0.0.0.0 unless this sits behind a trusted boundary; that would
+# publish an unauthenticated search endpoint.
+Environment=NODE_ENV=production
+Environment=MODE=http
+Environment=HOST=127.0.0.1
+Environment=PORT=3000
+
+ExecStart=/usr/bin/env node %h/open-websearch/build/index.js
+
+Restart=always
+RestartSec=5
+
+# The service only writes logs; keep the journal as the log sink.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=open-websearch
+
+# Hardening: this listener is unauthenticated, so contain it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/open-websearch
+
+[Install]
+WantedBy=default.target
