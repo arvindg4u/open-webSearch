@@ -73,12 +73,25 @@ boundary - that would publish an open search endpoint.
 
 Codex CLI supports MCP servers via `~/.codex/config.toml`. The server uses **Streamable HTTP** transport.
 
-### Option 1: Using the CLI
+Codex CLI needs the full Streamable HTTP session lifecycle: `POST /mcp` to
+initialize and call tools, `GET /mcp` to open the server-to-client event stream,
+and `DELETE /mcp` to terminate the session on exit. This server serves all three
+on the same `/mcp` path. A plain `GET /mcp` without a session id remains the
+liveness probe (`ok`).
+
+### Option 1: Using the CLI (recommended)
 
 ```bash
-# Codex CLI does not support `codex mcp add` for HTTP servers directly.
-# Edit the config file instead (Option 2).
+codex mcp add web-search --url http://127.0.0.1:3000/mcp
 ```
+
+For the hosted endpoint, replace the URL with
+`https://open-web-search-2oih.onrender.com/mcp`. Add a bearer token with
+`--bearer-token-env-var KEEPALIVE_TOKEN` when the endpoint requires one.
+
+`codex mcp add` writes the server to the global config and preserves the rest of
+the file. An older Codex build that lacks `--url` support fails with a usage
+error; in that case use Option 2.
 
 ### Option 2: Editing config.toml
 
@@ -86,7 +99,7 @@ Add the following to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.web-search]
-url = "https://open-web-search-2oih.onrender.com/mcp"
+url = "http://127.0.0.1:3000/mcp"
 ```
 
 For authenticated access (optional):
@@ -112,17 +125,53 @@ codex mcp list
 You should see:
 
 ```
-Name        Url                                            Status
-web-search  https://open-web-search-2oih.onrender.com/mcp  enabled
+Name        Url                        Status
+web-search  http://127.0.0.1:3000/mcp  enabled
 ```
 
-In the Codex TUI, type `/mcp` to see your active MCP servers.
+In the Codex TUI, type `/mcp` to see your active MCP servers, and `/mcp verbose`
+to list the tools each one exposes.
+
+To confirm the tools are actually callable rather than merely configured:
+
+```bash
+codex exec "Use the search tool for 'model context protocol' and give me the first result title."
+```
+
+Codex nests each server's tools under a namespace derived from the server name,
+with hyphens replaced by underscores. A server configured as `web-search`
+appears as `mcp__web_search`, so the tools are addressed as
+`mcp__web_search.search`, `mcp__web_search.fetchWebContent`,
+`mcp__web_search.fetchGithubReadme`, `mcp__web_search.fetchCsdnArticle`,
+`mcp__web_search.fetchJuejinArticle`, and
+`mcp__web_search.fetchLinuxDoArticle`. The model calls them by tool name
+(`search`) inside that namespace.
+
+> **Model support:** not every model can call namespaced MCP tools. If
+> `codex mcp list` shows `web-search` as `enabled` and `codex mcp get` shows the
+> right URL, but the model still reports no search tool, the transport is fine
+> and the limitation is on the model side. Verify the server independently with
+> the MCP SDK or `curl`, then switch models if needed.
+
+To prove Codex-side compatibility without depending on the model, call the tool
+through Codex's own MCP client over the app-server API. This bypasses the model
+entirely and exercises the same transport Codex uses in a session:
+
+```jsonc
+// codex app-server, one request per line
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"verify","version":"1"},"capabilities":{}}}
+{"jsonrpc":"2.0","id":2,"method":"thread/start","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"mcpServer/tool/call","params":{"threadId":"<id from id:2>","server":"web-search","tool":"search","arguments":{"query":"model context protocol","limit":2}}}
+```
+
+A live result payload in the `id:3` response means the server, the transport, and
+Codex's client are all working.
 
 ### Advanced Configuration
 
 ```toml
 [mcp_servers.web-search]
-url = "https://open-web-search-2oih.onrender.com/mcp"
+url = "http://127.0.0.1:3000/mcp"
 bearer_token_env_var = "KEEPALIVE_TOKEN"
 enabled = true
 tool_timeout_sec = 60
@@ -131,9 +180,8 @@ default_tools_approval_mode = "auto"
 # Limit to specific tools
 enabled_tools = ["search", "fetchWebContent"]
 
-# Per-tool approval overrides
-[tools."web-search".search]
-approval_mode = "auto"
+# Hide individual tools
+disabled_tools = ["fetchCsdnArticle"]
 ```
 
 **Reference:** [Codex MCP Documentation](https://developers.openai.com/codex/mcp)
@@ -343,6 +391,8 @@ for why one shared HTTP instance is recommended over per-client stdio servers.
 | Auth token | `bearer_token_env_var = "VAR"` | `"Authorization": "Bearer ..."` header |
 | Timeout | `tool_timeout_sec = 60` | Not configurable per-server |
 | Tool filter | `enabled_tools = [...]` | Not supported natively |
+| Add via CLI | `codex mcp add web-search --url URL` | `claude mcp add --transport http web-search URL` |
+| List servers | `codex mcp list` | `claude mcp list` |
 
 ---
 

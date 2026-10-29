@@ -62,6 +62,14 @@ Stage script:
    - Confirm that the runtime now exposes the core tools.
    - Do not stop at “config updated”; verify tool visibility.
 
+Client note for Codex CLI:
+- Register with `codex mcp add web-search --url http://127.0.0.1:3000/mcp`,
+  then confirm with `codex mcp list`.
+- Codex needs `POST`, `GET`, and `DELETE` on `/mcp`. If `initialize` succeeds but
+  the client reports `Unexpected content type: text/html` or a 404 on session
+  teardown, the server is not routing the streamed `GET` or `DELETE`; that is a
+  server-side route problem, not a client config problem.
+
 ## Local source/build mode
 
 Use when:

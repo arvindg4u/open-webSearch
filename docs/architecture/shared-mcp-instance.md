@@ -56,6 +56,26 @@ scripts and one-shot CLI calls. A service started with `serve` looks healthy on
 - The listener address is always logged at startup, so a socket never appears
   without a corresponding log line.
 
+## Method contract on `/mcp`
+
+The MCP Streamable HTTP transport uses more than `POST`. All three methods share
+the single `/mcp` path, and a client that cannot complete one of them is not
+fully connected even though `initialize` succeeded:
+
+| Method | Session id | Purpose |
+|---|---|---|
+| `POST` | none | `initialize`; the response carries the `Mcp-Session-Id` |
+| `POST` | required | JSON-RPC requests on a live session (`tools/list`, `tools/call`, ...) |
+| `GET` | none | plain liveness probe (`ok`), used by health checks |
+| `GET` | required | opens the server-to-client SSE stream (`text/event-stream`) |
+| `DELETE` | required | terminates the session and removes it from the map |
+
+Because `GET /mcp` is overloaded, the session id is what distinguishes the probe
+from the event stream. Routing the streamed `GET` to the plain-text probe makes
+strict clients reject the response (`Unexpected content type: text/html`) and
+drop the connection, and omitting `DELETE` leaves the client's teardown at 404.
+Both were real Codex CLI failures; `test-mcp-session-lifecycle` covers them.
+
 ## Default MODE
 
 An unset `MODE` means **stdio only**. A stdio client connecting must never cause
@@ -73,8 +93,11 @@ every bare invocation). Opt in explicitly with `MODE=http` or `MODE=both`.
 
 ## Session lifecycle
 
-Accepted sessions live in a map keyed by `Mcp-Session-Id`. A client that
-disconnects without sending `DELETE` never fires `transport.onclose`, so:
+Accepted sessions live in a map keyed by `Mcp-Session-Id`. A clean client
+(Codex CLI, Claude Code, the MCP SDK) sends `DELETE /mcp` on exit, which the
+transport turns into `onclose` and an immediate removal from the map. A client
+that dies without sending `DELETE` never fires `transport.onclose`, so the
+sweep and the cap below exist as the backstop:
 
 - idle sessions are swept after `OPEN_WEBSEARCH_MCP_SESSION_IDLE_TIMEOUT_MS`
   (default 300000);

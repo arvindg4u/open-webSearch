@@ -137,7 +137,7 @@ For detailed step-by-step guidance on connecting this MCP server to **Codex CLI*
 📄 **[MCP-SETUP-GUIDE.md](./MCP-SETUP-GUIDE.md)**
 
 Covers:
-- Adding the server to Codex CLI via `config.toml`
+- Adding the server to Codex CLI via `codex mcp add` or `config.toml`
 - Adding the server to Claude Code via `claude mcp add` (HTTP transport)
 - JSON configuration for `.mcp.json` and `~/.claude.json`
 - Available tools and parameters reference

@@ -72,6 +72,108 @@ function kill(child: ChildProcess): void {
     }
 }
 
+/**
+ * GET /mcp must open the server-to-client SSE stream for a live session.
+ *
+ * Codex CLI (and any Streamable HTTP client) issues GET /mcp after initialize
+ * and expects `text/event-stream`. When the route only answered the plain-text
+ * health check, clients logged "Unexpected content type: text/html" and dropped
+ * the connection.
+ */
+async function testGetOpensSessionStream(): Promise<void> {
+    const port = await findFreePort();
+    const child = spawnServer({ MODE: 'http', PORT: String(port), HOST: '127.0.0.1' });
+    const controller = new AbortController();
+
+    try {
+        assert(await waitForListener(port), `server should listen on 127.0.0.1:${port}`);
+
+        // Without a session id, GET stays the cheap liveness probe.
+        const health = await fetch(`http://127.0.0.1:${port}/mcp`);
+        assertEqual(health.status, 200, 'GET /mcp without a session must stay the health check');
+        assert(
+            !(health.headers.get('content-type') || '').includes('text/event-stream'),
+            `health check must not open an SSE stream, got ${health.headers.get('content-type')}`
+        );
+        await health.text().catch(() => undefined);
+
+        const init = await initializeSession(port);
+        assert(init.sessionId !== null, 'initialize must return a session id');
+
+        const stream = await fetch(`http://127.0.0.1:${port}/mcp`, {
+            headers: {
+                'Accept': 'text/event-stream',
+                'Mcp-Session-Id': init.sessionId as string
+            },
+            signal: controller.signal
+        });
+
+        assertEqual(stream.status, 200, 'GET with a live session must open the SSE stream');
+        assert(
+            (stream.headers.get('content-type') || '').includes('text/event-stream'),
+            `expected text/event-stream, got ${stream.headers.get('content-type')}`
+        );
+        // Drain (and abandon) the long-lived stream.
+        await stream.body?.cancel().catch(() => undefined);
+    } finally {
+        controller.abort();
+        kill(child);
+    }
+
+    console.log('✅ GET /mcp opens the SSE stream for a live session and stays a probe without one');
+}
+
+/**
+ * DELETE /mcp must terminate the session.
+ *
+ * Codex CLI tears its session down with DELETE on exit. A 404 there means the
+ * session is never reclaimed on the client's terms and only the idle sweep
+ * frees it.
+ */
+async function testDeleteTerminatesSession(): Promise<void> {
+    const port = await findFreePort();
+    const child = spawnServer({ MODE: 'http', PORT: String(port), HOST: '127.0.0.1' });
+
+    try {
+        assert(await waitForListener(port), `server should listen on 127.0.0.1:${port}`);
+
+        const init = await initializeSession(port);
+        assert(init.sessionId !== null, 'initialize must return a session id');
+        const sessionId = init.sessionId as string;
+
+        const deleted = await fetch(`http://127.0.0.1:${port}/mcp`, {
+            method: 'DELETE',
+            headers: {
+                'Accept': 'application/json, text/event-stream',
+                'Mcp-Session-Id': sessionId
+            }
+        });
+        assertEqual(deleted.status, 200, 'DELETE with a live session must succeed');
+        await deleted.text().catch(() => undefined);
+
+        assertEqual(
+            await reuseSession(port, sessionId),
+            404,
+            'a deleted session must not be reusable'
+        );
+
+        // An unknown session id must be reported, not adopted.
+        const unknown = await fetch(`http://127.0.0.1:${port}/mcp`, {
+            method: 'DELETE',
+            headers: {
+                'Accept': 'application/json, text/event-stream',
+                'Mcp-Session-Id': '00000000-0000-4000-8000-000000000000'
+            }
+        });
+        assertEqual(unknown.status, 404, 'DELETE with an unknown session must be rejected');
+        await unknown.text().catch(() => undefined);
+    } finally {
+        kill(child);
+    }
+
+    console.log('✅ DELETE /mcp terminates the session and rejects an unknown one');
+}
+
 type InitResult = { sessionId: string | null; status: number };
 
 /** POST an MCP initialize and capture the negotiated session id. */
@@ -219,6 +321,8 @@ async function main(): Promise<void> {
     await testUnknownSessionIsRejected();
     await testIdleSessionIsEvicted();
     await testSessionCountIsCapped();
+    await testGetOpensSessionStream();
+    await testDeleteTerminatesSession();
     console.log('\nMCP session lifecycle tests passed.');
 }
 

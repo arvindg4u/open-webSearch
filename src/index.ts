@@ -94,8 +94,10 @@ async function main() {
 
     const mcpCorsOptions: CorsOptions = {
       origin: config.corsOrigin || '*',
-      methods: ['GET', 'POST'],
-      allowedHeaders: ['Content-Type', 'Mcp-Session-Id'],
+      // DELETE is part of the MCP Streamable HTTP session lifecycle; omitting it
+      // makes browsers and strict clients fail to terminate sessions.
+      methods: ['GET', 'POST', 'DELETE'],
+      allowedHeaders: ['Content-Type', 'Mcp-Session-Id', 'Mcp-Protocol-Version'],
       exposedHeaders: ['Mcp-Session-Id'],
     };
 
@@ -212,8 +214,79 @@ async function main() {
       }
     });
 
-    // Health check
-    app.get('/mcp', (_req, res) => res.status(200).send('ok'));
+    // GET /mcp is overloaded by the MCP Streamable HTTP spec: a request WITHOUT
+    // a session id is a plain liveness probe, while a request WITH one opens the
+    // server-to-client SSE stream. The plain-text health check answered both, so
+    // a client that opened the stream got `text/html` instead of
+    // `text/event-stream` and logged "Unexpected content type". Keep the simple
+    // probe for the health check and delegate real sessions to the transport.
+    app.get('/mcp', async (req, res) => {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+      if (!sessionId) {
+        res.status(200).send('ok');
+        return;
+      }
+
+      const session = sessions.get(sessionId);
+      if (!session) {
+        res.status(404).json({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'Session not found; re-initialize.' },
+          id: null,
+        });
+        return;
+      }
+
+      try {
+        session.lastSeen = Date.now();
+        await session.transport.handleRequest(req, res);
+      } catch (error) {
+        console.error('❌ MCP GET handler error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: String(error) },
+            id: null,
+          });
+        }
+      }
+    });
+
+    // DELETE /mcp terminates an MCP session. Without this route the transport
+    // never receives the request, the CLI sees a 404, and the session lingers
+    // until the idle sweep reclaims it.
+    app.delete('/mcp', async (req, res) => {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+      if (!sessionId || !sessions.has(sessionId)) {
+        // Match the POST behaviour: an unknown session is reported, not adopted.
+        res.status(404).json({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'Session not found; re-initialize.' },
+          id: null,
+        });
+        return;
+      }
+
+      const session = sessions.get(sessionId)!;
+      try {
+        // handleRequest closes the transport, which fires onclose and removes
+        // the session from the map.
+        await session.transport.handleRequest(req, res);
+      } catch (error) {
+        console.error('❌ MCP DELETE handler error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: String(error) },
+            id: null,
+          });
+        }
+      } finally {
+        closeSession(sessionId);
+      }
+    });
 
     app.get("/keepalive", (req, res) => {
       const auth = req.headers.authorization;
