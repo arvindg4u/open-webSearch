@@ -106,9 +106,19 @@ sweep and the cap below exist as the backstop:
 - a request carrying an unknown session id gets **404** and must re-initialize,
   rather than being silently handed a fresh session.
 
+## Reaching it from outside the host
+
+Loopback binding is the control for the local surface, so a remote client
+cannot connect to it directly. To serve clients on other machines, terminate
+TLS at a reverse proxy and enforce a bearer token there - the daemon stays on
+loopback and needs no change. See
+[public-mcp-endpoint.md](public-mcp-endpoint.md) for that deployment, and
+`nginx/open-websearch-mcp.conf.example` for a starting config.
+
 ## Not in v1
 
 - Authentication on the local HTTP surface (beyond the existing
-  `KEEPALIVE_TOKEN` on `/keepalive`). Loopback binding is the control.
+  `KEEPALIVE_TOKEN` on `/keepalive`). Loopback binding is the control, and a
+  public deployment authenticates at the proxy instead of in the server.
 - Unix sockets or named pipes for the MCP transport.
 - Cross-host fan-out or load balancing across multiple instances.
