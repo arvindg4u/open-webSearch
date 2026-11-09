@@ -34,6 +34,7 @@
     "test:http-mcp-defaults": "tsc && node build/test/test-http-mcp-defaults.js",
     "test:mcp-adapter": "tsc && node build/test/test-mcp-adapter.js",
     "test:mcp-session-lifecycle": "tsc && node build/test/test-mcp-session-lifecycle.js",
+    "test:http-mcp-stateless": "tsc && node build/test/test-http-mcp-stateless.js",
     "test:runtime": "tsc && node build/test/test-runtime.js",
     "test:sogou": "tsc && node build/test/test-sogou.js",
     "test:startpage": "tsc && node build/test/test-startpage.js",

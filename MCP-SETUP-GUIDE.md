@@ -383,6 +383,7 @@ Once connected, the server provides these tools:
 | `PORT` | `3000` | HTTP MCP port (`/mcp`). Distinct from the REST daemon's `OPEN_WEBSEARCH_DAEMON_PORT`. |
 | `OPEN_WEBSEARCH_MCP_SESSION_IDLE_TIMEOUT_MS` | `300000` | Evict an idle HTTP MCP session after this long. |
 | `OPEN_WEBSEARCH_MCP_MAX_SESSIONS` | `64` | Cap concurrent HTTP MCP sessions (evicts least-recently-used). |
+| `OPEN_WEBSEARCH_MCP_STATELESS` | `false` | Opt in to stateless Streamable HTTP: no `Mcp-Session-Id`, no session map. Follows the MCP stateless direction (2026-07-28) and removes the session-map surface entirely. Off by default; verify your clients before enabling. |
 | `ENABLE_CORS` | `false` | Enable CORS support |
 | `CORS_ORIGIN` | `*` | CORS allowed origin |
 | `DEFAULT_SEARCH_ENGINE` | `duckduckgo` | Default search engine |

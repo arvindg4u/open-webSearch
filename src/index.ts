@@ -106,6 +106,63 @@ async function main() {
       app.options('*', cors(mcpCorsOptions));
     }
 
+    // Two session models for the same /mcp surface, chosen by env:
+    //
+    // - stateful (default): a protocol session per client, tracked in a map and
+    //   reaped on idle/overflow. Needed by clients that rely on Mcp-Session-Id.
+    // - stateless (OPEN_WEBSEARCH_MCP_STATELESS=true): no protocol session at
+    //   all. Each POST gets a fresh server+transport torn down with its response,
+    //   so there is nothing to sweep, cap, or re-initialize. This follows the
+    //   stateless direction of MCP (2026-07-28) and removes the session-map leak
+    //   surface entirely. Kept off by default: it changes the transport behaviour
+    //   clients see, so enable it only after verifying your clients.
+    const statelessMcp = process.env.OPEN_WEBSEARCH_MCP_STATELESS === 'true';
+
+    if (statelessMcp) {
+      app.post('/mcp', async (req, res) => {
+        // A stateless transport must not be reused across requests, so build one
+        // per request and dispose of it when the response is done.
+        const server = createServer(runtime);
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+        });
+        res.on('close', () => {
+          void transport.close().catch(() => undefined);
+          void server.close().catch(() => undefined);
+        });
+        try {
+          await server.connect(transport);
+          await transport.handleRequest(req, res, req.body);
+        } catch (error) {
+          console.error('❌ MCP handler error:', error);
+          if (!res.headersSent) {
+            res.status(500).json({
+              jsonrpc: '2.0',
+              error: { code: -32603, message: String(error) },
+              id: null,
+            });
+          }
+        }
+      });
+
+      // Without a session id, GET stays the cheap liveness probe. With one there
+      // is no session to stream from, so reject rather than pretend otherwise.
+      app.get('/mcp', (req, res) => {
+        if (req.headers['mcp-session-id']) {
+          res.status(405).json({
+            jsonrpc: '2.0',
+            error: { code: -32000, message: 'Server-initiated streams are disabled in stateless mode.' },
+            id: null,
+          });
+          return;
+        }
+        res.status(200).send('ok');
+      });
+
+      // There is no session to terminate; answer idempotently so a client that
+      // tears down with DELETE on exit does not see an error.
+      app.delete('/mcp', (_req, res) => res.status(200).send('ok'));
+    } else {
     // Per-session transport storage.
     //
     // A client that disconnects without sending DELETE (crash, kill, dropped
@@ -287,6 +344,7 @@ async function main() {
         closeSession(sessionId);
       }
     });
+    }
 
     app.get("/keepalive", (req, res) => {
       const auth = req.headers.authorization;

@@ -115,6 +115,33 @@ loopback and needs no change. See
 [public-mcp-endpoint.md](public-mcp-endpoint.md) for that deployment, and
 `nginx/open-websearch-mcp.conf.example` for a starting config.
 
+## Stateless mode (opt-in)
+
+`OPEN_WEBSEARCH_MCP_STATELESS=true` selects a second session model for the same
+`/mcp` surface. Instead of tracking a protocol session, each POST gets a fresh
+`McpServer` + transport that is torn down when its response closes, and no
+`Mcp-Session-Id` is ever issued.
+
+Why it exists: as of the MCP **2026-07-28** revision, MCP is stateless — there is
+no protocol session to store, so a search/fetch server (which holds no per-client
+state) does not need one. Stateless mode therefore *removes* the whole
+session-map surface — no idle sweep, no LRU cap, no re-initialize 404 — rather
+than bounding it as the stateful path above does.
+
+| | stateful (default) | stateless (`OPEN_WEBSEARCH_MCP_STATELESS=true`) |
+|---|---|---|
+| `Mcp-Session-Id` | issued per client | never issued |
+| Session map | yes, swept + capped | none |
+| `GET /mcp` with a session | opens the SSE stream | **405** (no stream to open) |
+| `GET /mcp` without one | liveness probe (`ok`) | liveness probe (`ok`) |
+| `DELETE /mcp` | terminates the session | idempotent `200` no-op |
+
+It is **off by default** and must not be flipped without verifying the clients
+that connect. It changes the transport behaviour a client sees (no session id to
+reuse, no server-initiated stream), so a client that depends on either will
+behave differently. The stateful path stays the default precisely because it is
+the one already verified against every CLI on this host.
+
 ## Not in v1
 
 - Authentication on the local HTTP surface (beyond the existing
