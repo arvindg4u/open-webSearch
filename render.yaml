@@ -1,3 +1,11 @@
+# DISCONTINUED — kept for reference only.
+#
+# This fork is deployed locally: one shared instance runs under the systemd user
+# unit `open-websearch.service` (MODE=http, 127.0.0.1:3000) and the public
+# endpoint https://search.rvndha.duckdns.org/mcp is that same instance behind
+# local nginx with a bearer-token gate. The Render web service this file used to
+# describe is no longer running, and nothing here is deployed or synced.
+# See docs/architecture/public-mcp-endpoint.md.
 services:
   - type: web
     name: open-websearch

@@ -1,6 +1,16 @@
 # MCP Server Setup Guide
 
-This guide explains how to connect the **open-webSearch MCP server** (deployed at `https://open-web-search-2oih.onrender.com/mcp`) to your AI coding tools.
+This guide explains how to connect the **open-webSearch MCP server** to your AI coding tools.
+
+> **Deployment:** this fork runs **locally only**. One shared instance is served by
+> the systemd user unit `open-websearch.service` (`MODE=http` on `127.0.0.1:3000`,
+> see [shared-mcp-instance.md](docs/architecture/shared-mcp-instance.md)). The
+> public endpoint `https://search.rvndha.duckdns.org/mcp` is that **same** local
+> instance reverse-proxied by nginx with a bearer-token gate (see
+> [public-mcp-endpoint.md](docs/architecture/public-mcp-endpoint.md)). The former
+> **Render deployment is discontinued** — `render.yaml` is kept for reference only
+> and there is no managed/cloud deploy. On-box clients should use
+> `http://127.0.0.1:3000/mcp` directly.
 
 ---
 
@@ -85,9 +95,10 @@ liveness probe (`ok`).
 codex mcp add web-search --url http://127.0.0.1:3000/mcp
 ```
 
-For the hosted endpoint, replace the URL with
-`https://open-web-search-2oih.onrender.com/mcp`. Add a bearer token with
-`--bearer-token-env-var KEEPALIVE_TOKEN` when the endpoint requires one.
+For the public (nginx) endpoint, replace the URL with
+`https://search.rvndha.duckdns.org/mcp`. That endpoint requires the bearer token
+nginx enforces (not `KEEPALIVE_TOKEN`, which only guards `/keepalive`), supplied
+via `--bearer-token-env-var <VAR>`. On-box clients need no token.
 
 `codex mcp add` writes the server to the global config and preserves the rest of
 the file. An older Codex build that lacks `--url` support fails with a usage
@@ -106,7 +117,7 @@ For authenticated access (optional):
 
 ```toml
 [mcp_servers.web-search]
-url = "https://open-web-search-2oih.onrender.com/mcp"
+url = "https://search.rvndha.duckdns.org/mcp"
 bearer_token_env_var = "KEEPALIVE_TOKEN"
 ```
 
@@ -197,19 +208,19 @@ Claude Code supports MCP servers via `claude mcp add` or by editing configuratio
 **User scope** (available across all projects):
 
 ```bash
-claude mcp add --transport http web-search https://open-web-search-2oih.onrender.com/mcp
+claude mcp add --transport http web-search https://search.rvndha.duckdns.org/mcp
 ```
 
 **Project scope** (shared with team via `.mcp.json`):
 
 ```bash
-claude mcp add --transport http web-search --scope project https://open-web-search-2oih.onrender.com/mcp
+claude mcp add --transport http web-search --scope project https://search.rvndha.duckdns.org/mcp
 ```
 
 **With authentication header:**
 
 ```bash
-claude mcp add --transport http web-search https://open-web-search-2oih.onrender.com/mcp \
+claude mcp add --transport http web-search https://search.rvndha.duckdns.org/mcp \
   --header "Authorization: Bearer your-token"
 ```
 
@@ -222,7 +233,7 @@ Add to your project's `.mcp.json` (shared with team):
   "mcpServers": {
     "web-search": {
       "type": "http",
-      "url": "https://open-web-search-2oih.onrender.com/mcp"
+      "url": "https://search.rvndha.duckdns.org/mcp"
     }
   }
 }
@@ -237,7 +248,7 @@ Or to `~/.claude.json` (user-global, stored per project path):
       "mcpServers": {
         "web-search": {
           "type": "http",
-          "url": "https://open-web-search-2oih.onrender.com/mcp"
+          "url": "https://search.rvndha.duckdns.org/mcp"
         }
       }
     }
@@ -252,7 +263,7 @@ Or to `~/.claude.json` (user-global, stored per project path):
 ```bash
 claude mcp add-json '{
   "type": "http",
-  "url": "https://open-web-search-2oih.onrender.com/mcp"
+  "url": "https://search.rvndha.duckdns.org/mcp"
 }'
 ```
 
@@ -396,5 +407,5 @@ for why one shared HTTP instance is recommended over per-client stdio servers.
 
 ---
 
-*Server URL: `https://open-web-search-2oih.onrender.com/mcp`*
-*Keepalive endpoint: `https://open-web-search-2oih.onrender.com/keepalive`*
+*Server URL: `https://search.rvndha.duckdns.org/mcp`*
+*Keepalive endpoint: `https://search.rvndha.duckdns.org/keepalive`*
