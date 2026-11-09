@@ -36,6 +36,8 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         enableCors: false,
         corsOrigin: '*',
         enableHttpServer: true,
+        httpHost: '127.0.0.1',
+        httpPort: 3000,
         ...overrides
     };
 }

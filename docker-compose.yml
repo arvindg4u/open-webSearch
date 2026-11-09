@@ -8,14 +8,25 @@ services:
     working_dir: /app
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # host:container. Keep the container side aligned with PORT below.
+      # The MCP HTTP surface has no authentication, so the host side is bound to
+      # loopback. Change it to "3000:3000" only behind a trusted boundary.
+      - "127.0.0.1:3000:3000"
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
     environment:
       NODE_ENV: production
+      # MODE=http is required: an unset MODE means stdio-only (no HTTP listener),
+      # so the container would serve nothing remotely reachable.
+      MODE: "http"
+      # Bind inside the container. With a published port the container must
+      # listen on 0.0.0.0 for the mapping to work; the host-side line above is
+      # what keeps it off the public interface.
+      HOST: "0.0.0.0"
+      PORT: "3000"
       # DEFAULT_SEARCH_ENGINE: "duckduckgo" # Optional: 'bing' | 'duckduckgo' | 'exa' | 'brave', default duckduckgo (optional)
       # USE_PROXY: true # Using a proxy (optional)
       # PROXY_URL: "http://host.docker.internal:7890"  #  Using a proxy (optional)
       ENABLE_CORS: "true"
-      CORS_ORIGIN: "*"  # Multiple values can be separated by commas and parsed accordingly | 可以多个值逗号分隔，自行解析
+      CORS_ORIGIN: "*"  # Multiple values can be separated by commas and parsed accordingly | 可以多个值逗号分隔,自行解析
     command: ["node", "build/index.js"]

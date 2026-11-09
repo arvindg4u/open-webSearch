@@ -94,8 +94,10 @@ async function main() {
 
     const mcpCorsOptions: CorsOptions = {
       origin: config.corsOrigin || '*',
-      methods: ['GET', 'POST'],
-      allowedHeaders: ['Content-Type', 'Mcp-Session-Id'],
+      // DELETE is part of the MCP Streamable HTTP session lifecycle; omitting it
+      // makes browsers and strict clients fail to terminate sessions.
+      methods: ['GET', 'POST', 'DELETE'],
+      allowedHeaders: ['Content-Type', 'Mcp-Session-Id', 'Mcp-Protocol-Version'],
       exposedHeaders: ['Mcp-Session-Id'],
     };
 
@@ -104,8 +106,42 @@ async function main() {
       app.options('*', cors(mcpCorsOptions));
     }
 
-    // Per-session transport storage
-    const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
+    // Per-session transport storage.
+    //
+    // A client that disconnects without sending DELETE (crash, kill, dropped
+    // connection) never triggers transport.onclose, so its McpServer + transport
+    // stays resident for the life of the process. That is the server-side half
+    // of the leak this shared instance exists to fix, so evict idle sessions and
+    // cap the map.
+    const SESSION_IDLE_TIMEOUT_MS = Number(process.env.OPEN_WEBSEARCH_MCP_SESSION_IDLE_TIMEOUT_MS || 300000);
+    const MAX_MCP_SESSIONS = Number(process.env.OPEN_WEBSEARCH_MCP_MAX_SESSIONS || 64);
+    type HttpSession = {
+      server: McpServer;
+      transport: StreamableHTTPServerTransport;
+      lastSeen: number;
+    };
+    const sessions = new Map<string, HttpSession>();
+
+    function closeSession(sessionId: string): void {
+      const session = sessions.get(sessionId);
+      if (!session) {
+        return;
+      }
+      sessions.delete(sessionId);
+      void session.transport.close().catch(() => undefined);
+      void session.server.close().catch(() => undefined);
+    }
+
+    // Sweep idle sessions. unref() so this timer never holds the process open.
+    const sessionSweeper = setInterval(() => {
+      const cutoff = Date.now() - SESSION_IDLE_TIMEOUT_MS;
+      for (const [sessionId, session] of sessions) {
+        if (session.lastSeen < cutoff) {
+          closeSession(sessionId);
+        }
+      }
+    }, Math.max(1000, Math.min(SESSION_IDLE_TIMEOUT_MS, 60000)));
+    sessionSweeper.unref();
 
     app.post('/mcp', async (req, res) => {
       try {
@@ -114,8 +150,37 @@ async function main() {
         if (sessionId && sessions.has(sessionId)) {
           // Resume existing session
           const session = sessions.get(sessionId)!;
+          session.lastSeen = Date.now();
           await session.transport.handleRequest(req, res, req.body);
           return;
+        }
+
+        // A session id we do not know (evicted, or from a previous process) must
+        // not silently become a new session: tell the client so it re-initializes
+        // instead of believing its old session is still valid.
+        if (sessionId && !sessions.has(sessionId)) {
+          res.status(404).json({
+            jsonrpc: '2.0',
+            error: { code: -32001, message: 'Session not found; re-initialize.' },
+            id: null,
+          });
+          return;
+        }
+
+        // Cap concurrent sessions so a client that never disconnects cleanly
+        // cannot grow the map without bound; evict the least recently used.
+        if (sessions.size >= MAX_MCP_SESSIONS) {
+          let oldestId: string | undefined;
+          let oldestSeen = Infinity;
+          for (const [sid, session] of sessions) {
+            if (session.lastSeen < oldestSeen) {
+              oldestSeen = session.lastSeen;
+              oldestId = sid;
+            }
+          }
+          if (oldestId) {
+            closeSession(oldestId);
+          }
         }
 
         // New session — create server + transport
@@ -123,13 +188,14 @@ async function main() {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sid) => {
-            sessions.set(sid, { server, transport });
+            sessions.set(sid, { server, transport, lastSeen: Date.now() });
           },
         });
 
         transport.onclose = () => {
           if (transport.sessionId) {
-            sessions.delete(transport.sessionId);
+            closeSession(transport.sessionId);
+            return;
           }
           void server.close().catch(() => {});
         };
@@ -148,8 +214,79 @@ async function main() {
       }
     });
 
-    // Health check
-    app.get('/mcp', (_req, res) => res.status(200).send('ok'));
+    // GET /mcp is overloaded by the MCP Streamable HTTP spec: a request WITHOUT
+    // a session id is a plain liveness probe, while a request WITH one opens the
+    // server-to-client SSE stream. The plain-text health check answered both, so
+    // a client that opened the stream got `text/html` instead of
+    // `text/event-stream` and logged "Unexpected content type". Keep the simple
+    // probe for the health check and delegate real sessions to the transport.
+    app.get('/mcp', async (req, res) => {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+      if (!sessionId) {
+        res.status(200).send('ok');
+        return;
+      }
+
+      const session = sessions.get(sessionId);
+      if (!session) {
+        res.status(404).json({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'Session not found; re-initialize.' },
+          id: null,
+        });
+        return;
+      }
+
+      try {
+        session.lastSeen = Date.now();
+        await session.transport.handleRequest(req, res);
+      } catch (error) {
+        console.error('❌ MCP GET handler error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: String(error) },
+            id: null,
+          });
+        }
+      }
+    });
+
+    // DELETE /mcp terminates an MCP session. Without this route the transport
+    // never receives the request, the CLI sees a 404, and the session lingers
+    // until the idle sweep reclaims it.
+    app.delete('/mcp', async (req, res) => {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+      if (!sessionId || !sessions.has(sessionId)) {
+        // Match the POST behaviour: an unknown session is reported, not adopted.
+        res.status(404).json({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'Session not found; re-initialize.' },
+          id: null,
+        });
+        return;
+      }
+
+      const session = sessions.get(sessionId)!;
+      try {
+        // handleRequest closes the transport, which fires onclose and removes
+        // the session from the map.
+        await session.transport.handleRequest(req, res);
+      } catch (error) {
+        console.error('❌ MCP DELETE handler error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: String(error) },
+            id: null,
+          });
+        }
+      } finally {
+        closeSession(sessionId);
+      }
+    });
 
     app.get("/keepalive", (req, res) => {
       const auth = req.headers.authorization;
@@ -161,10 +298,39 @@ async function main() {
       res.json({ ok: true, time: new Date().toISOString() });
     });
 
-    const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+    const host = config.httpHost;
+    const port = config.httpPort;
 
-    app.listen(PORT, '0.0.0.0', () => {
-      console.error(`✅ HTTP server running on port ${PORT}`)
+    const httpServer = app.listen(port, host, () => {
+      console.error(`✅ HTTP MCP server listening on http://${host}:${port}/mcp`);
+    });
+
+    httpServer.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(
+          `❌ Cannot bind http://${host}:${port} - address already in use. ` +
+          'Another open-websearch instance is probably serving this port. ' +
+          'Use one shared instance, or set PORT to a free port.'
+        );
+      } else if (error.code === 'EACCES') {
+        console.error(
+          `❌ Cannot bind http://${host}:${port} - permission denied. ` +
+          'Ports below 1024 need elevated privileges; set PORT to a higher port.'
+        );
+      } else {
+        console.error(`❌ HTTP MCP server failed to listen on http://${host}:${port}:`, error);
+      }
+
+      // Whenever a stdio transport is live (MODE unset, 'stdio', or 'both') the
+      // MCP client is already connected over it, so a port conflict must not
+      // take the server down with it. Only pure HTTP mode (MODE=http, which has
+      // no stdio fallback) has nothing left to serve.
+      const stdioActive = process.env.MODE !== 'http';
+      if (stdioActive) {
+        console.error('   Continuing without the HTTP listener; the STDIO transport is unaffected.');
+        return;
+      }
+      process.exitCode = 1;
     });
   } else {
     console.error('ℹ️ HTTP server disabled, running in STDIO mode only')

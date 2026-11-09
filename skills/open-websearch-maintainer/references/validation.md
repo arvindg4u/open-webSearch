@@ -12,6 +12,8 @@ Run the tests relevant to the touched area, for example:
 - `npm run test:http-request-options`
 - `npm run test:web-content`
 - `npm run test:startpage`
+- `npm run test:mcp-session-lifecycle` when changing the `/mcp` route handling
+  (POST/GET/DELETE), session storage, or the HTTP transport wiring
 
 ## Live checks
 

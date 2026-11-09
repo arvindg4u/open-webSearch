@@ -372,6 +372,25 @@ npm run build
 ```
 4. 将服务器添加到您的MCP配置中：
 
+**Codex CLI:**
+
+```bash
+codex mcp add web-search --url http://127.0.0.1:3000/mcp
+codex mcp list
+```
+
+也可以直接编辑 `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.web-search]
+url = "http://127.0.0.1:3000/mcp"
+```
+
+Codex CLI 走完整的 Streamable HTTP 会话流程: `POST /mcp` 初始化并调用工具,`GET /mcp`
+打开服务端到客户端的事件流,`DELETE /mcp` 在退出时结束会话;三者共用同一个 `/mcp` 路径。
+不带 session id 的 `GET /mcp` 仍然是存活探针(`ok`)。详细步骤见
+[MCP-SETUP-GUIDE.md](./MCP-SETUP-GUIDE.md)。
+
 **Cherry Studio:**
 ```json
 {

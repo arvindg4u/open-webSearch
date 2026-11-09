@@ -1,0 +1,89 @@
+# Public HTTPS exposure for the shared open-websearch MCP instance.
+#
+# Copy to /etc/nginx/sites-available/, set the hostname, certificate paths and
+# token, then:
+#
+#   sudo ln -s /etc/nginx/sites-available/<name> /etc/nginx/sites-enabled/
+#   sudo chmod 640 /etc/nginx/sites-available/<name>   # it holds a secret
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# Upstream is the systemd unit in systemd/open-websearch.service:
+#   MODE=http HOST=127.0.0.1 PORT=3000  ->  /mcp  (Streamable HTTP)
+#
+# This file carries the bearer token, which is why it lives in /etc/nginx and
+# never in the repo. Rotate it by editing the map below and reloading.
+#
+# NOTE: a "Bearer <48 hex>" map key exceeds nginx's default
+# map_hash_bucket_size (64). If nginx fails with "could not build map_hash",
+# add to a conf.d file:
+#
+#   echo 'map_hash_bucket_size 128;' | sudo tee /etc/nginx/conf.d/00-map-hash-bucket.conf
+
+map $http_authorization $mcp_bearer_ok {
+    default 0;
+    "Bearer CHANGE_ME" 1;
+}
+
+# /mcp is a long-lived session surface (each client holds one), not a
+# request/response API, so keep the rate well above normal use. It only stops a
+# runaway or abusive caller.
+limit_req_zone  $binary_remote_addr zone=mcp_api:10m  rate=20r/s;
+limit_conn_zone $binary_remote_addr zone=mcp_conn:10m;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name search.example.com;
+
+    # ACME over plain HTTP, if this name gets its own certificate.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name search.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    # MCP clients POST JSON-RPC; the daemon caps bodies at 1 MB itself.
+    client_max_body_size 4m;
+
+    server_tokens off;
+
+    location = /mcp {
+        # Rewrite phase, before limit_req/limit_conn: an unauthenticated
+        # request never consumes rate budget.
+        if ($mcp_bearer_ok = 0) { return 401; }
+
+        limit_req  zone=mcp_api burst=40 nodelay;
+        limit_conn mcp_conn 16;
+
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+
+        # Streamable HTTP: GET /mcp holds the server->client event stream open,
+        # so it must never be buffered and must not be reaped while idle.
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # Nothing else on the daemon is reachable from the internet.
+    location / { return 404; }
+}

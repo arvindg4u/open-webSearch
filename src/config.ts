@@ -27,6 +27,13 @@ export interface AppConfig {
     corsOrigin: string;
     // Server configuration (determined by MODE env var: 'both', 'http', or 'stdio')
     enableHttpServer: boolean;
+    // HTTP MCP listener address. Loopback by default: this server has no
+    // authentication, so binding it to a routable interface publishes an open
+    // search endpoint. Set HOST=0.0.0.0 only behind a trusted network boundary.
+    httpHost: string;
+    // HTTP MCP listener port (streamable HTTP on /mcp). Distinct from the local
+    // REST daemon, which uses OPEN_WEBSEARCH_DAEMON_PORT (default 3210).
+    httpPort: number;
 }
 
 function readOptionalEnv(name: string): string | undefined {
@@ -61,8 +68,13 @@ export const config: AppConfig = {
     enableCors: process.env.ENABLE_CORS === 'true',
     corsOrigin: process.env.CORS_ORIGIN || '*',
     // Server configuration - determined by MODE environment variable
-    // Modes: 'both' (default), 'http', 'stdio'
-    enableHttpServer: process.env.MODE ? ['both', 'http'].includes(process.env.MODE) : true
+    // Modes: 'stdio', 'http', 'both'. An unset MODE means STDIO ONLY: a stdio
+    // MCP client must never cause a listening socket to appear as a side effect.
+    // Opt in to HTTP explicitly with MODE=http or MODE=both. (This used to
+    // default to 'both' and bind 0.0.0.0:3000 on every bare invocation.)
+    enableHttpServer: process.env.MODE ? ['both', 'http'].includes(process.env.MODE) : false,
+    httpHost: process.env.HOST || '127.0.0.1',
+    httpPort: Number(process.env.PORT || 3000)
 };
 
 // Valid search engines list
@@ -120,6 +132,12 @@ if (config.playwrightWsEndpoint && config.playwrightCdpEndpoint) {
 
 if ((config.playwrightWsEndpoint || config.playwrightCdpEndpoint) && config.playwrightExecutablePath) {
     console.warn('PLAYWRIGHT_EXECUTABLE_PATH is ignored when connecting to a remote browser endpoint');
+}
+
+// Validate the HTTP MCP listener port (only meaningful when HTTP is enabled)
+if (!Number.isInteger(config.httpPort) || config.httpPort < 0 || config.httpPort > 65535) {
+    console.warn(`Invalid PORT: "${process.env.PORT}", falling back to 3000`);
+    config.httpPort = 3000;
 }
 
 // Validate allowed search engines
@@ -187,6 +205,14 @@ if (!quietStartupLogs) {
     console.error(`🖥️ Server mode: ${mode.toUpperCase()}`);
 
     if (config.enableHttpServer) {
+        // Never open a listening socket silently: say where it is and how to move it.
+        console.error(`🌐 HTTP MCP server: http://${config.httpHost}:${config.httpPort}/mcp`);
+        if (config.httpHost !== '127.0.0.1' && config.httpHost !== 'localhost' && config.httpHost !== '::1') {
+            console.warn(
+                `HOST=${config.httpHost} exposes the HTTP MCP server beyond loopback. ` +
+                'It has no authentication - bind 127.0.0.1 unless it is behind a trusted boundary.'
+            );
+        }
         if (config.enableCors) {
             console.error(`🔒 CORS enabled with origin: ${config.corsOrigin}`);
         } else {

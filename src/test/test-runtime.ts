@@ -22,7 +22,9 @@ function createTestConfig(): AppConfig {
         playwrightNavigationTimeoutMs: 20000,
         enableCors: false,
         corsOrigin: '*',
-        enableHttpServer: true
+        enableHttpServer: true,
+        httpHost: '127.0.0.1',
+        httpPort: 3000
     };
 }
 
