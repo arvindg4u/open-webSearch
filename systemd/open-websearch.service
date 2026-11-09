@@ -61,5 +61,13 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=%h/open-websearch
 
+# Bound the shared instance so a runaway (a leak, a stuck Playwright browser)
+# is contained instead of growing the whole host. Observed steady state is
+# ~110-160M with a ~380M peak (browser-fetch bursts), so MemoryHigh throttles
+# only past that and MemoryMax kills+restarts (Restart=always) rather than
+# letting the cgroup grow without bound.
+MemoryHigh=512M
+MemoryMax=768M
+
 [Install]
 WantedBy=default.target
