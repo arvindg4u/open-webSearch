@@ -12,6 +12,7 @@ export interface KvNamespace {
 export interface Env {
     CACHE?: KvNamespace;
     SEARXNG_URL?: string;
+    SEARXNG_API_KEY?: string;
     WIKIPEDIA_LANG?: string;
     SEARCH_CACHE_TTL_SECONDS?: string;
     ALLOWED_SEARCH_ENGINES?: string;
@@ -51,6 +52,7 @@ export type Topic = 'auto' | 'general' | 'code' | 'news' | 'academic';
 
 export interface RuntimeConfig {
     searxngUrl?: string;
+    searxngApiKey?: string;
     wikipediaLang: string;
     searchCacheTtlSeconds: number;
     allowedEngines: SupportedEngine[];
@@ -78,6 +80,7 @@ export function readConfig(env: Env): RuntimeConfig {
 
     return {
         searxngUrl: env.SEARXNG_URL?.trim() || undefined,
+        searxngApiKey: env.SEARXNG_API_KEY?.trim() || undefined,
         wikipediaLang: env.WIKIPEDIA_LANG?.trim() || 'en',
         searchCacheTtlSeconds: Number(env.SEARCH_CACHE_TTL_SECONDS || 0) || 0,
         allowedEngines: allowed.length > 0 ? allowed : [...available],

@@ -96,3 +96,14 @@ test('tokenizer is Unicode-aware (Devanagari relevance)', () => {
     assert.ok(lexicalCoverage(query, relevant) >= 0.9, 'Devanagari terms should match Hindi titles');
     assert.equal(lexicalCoverage(query, unrelated), 0, 'unrelated hit should score zero');
 });
+
+test('rankAndDiversify drops zero-coverage junk when a relevant hit exists', () => {
+    const query = 'राजस्थान वन नीति';
+    const fused = fuseRanked([
+        { engine: 'bing', results: [hit('bing', 'https://www.microsoft.com/', 'Microsoft Official Home Page', '')] },
+        { engine: 'searxng', results: [hit('searxng', 'https://example.org/forest', 'राजस्थान वन नीति 2023', '')] }
+    ]);
+    const ranked = rankAndDiversify(query, fused, 5);
+    assert.ok(ranked.every((result) => result.url !== 'https://www.microsoft.com/'), 'keyword-less junk is dropped');
+    assert.equal(ranked[0].url, 'https://example.org/forest');
+});

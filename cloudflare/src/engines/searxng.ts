@@ -22,6 +22,8 @@ export interface SearxngSearchOptions {
     language?: string;
     timeRange?: 'day' | 'month' | 'year';
     timeoutMs?: number;
+    /** Bearer token sent to the instance (e.g. when it is behind an auth proxy). */
+    apiKey?: string;
 }
 
 function buildSearchUrl(baseUrl: string, query: string, page: number, options: SearxngSearchOptions): string {
@@ -42,7 +44,7 @@ function buildSearchUrl(baseUrl: string, query: string, page: number, options: S
 }
 
 /** Query a SearXNG instance's JSON API. See https://docs.searxng.org/dev/search_api.html */
-export async function searchSearxng(
+async function searchSearxngOnce(
     query: string,
     limit: number,
     options: SearxngSearchOptions
@@ -53,18 +55,21 @@ export async function searchSearxng(
 
     const results: SearchResult[] = [];
     const seen = new Set<string>();
-    let lastUnresponsive: string[] = [];
 
     for (let page = 1; results.length < limit && page <= 10; page++) {
+        const headers: Record<string, string> = { Accept: 'application/json', 'User-Agent': USER_AGENT };
+        if (options.apiKey) {
+            headers.Authorization = `Bearer ${options.apiKey}`;
+        }
+
         const response = await fetchJson<SearxngResponse>(
             buildSearchUrl(options.baseUrl, query, page, options),
-            { headers: { Accept: 'application/json', 'User-Agent': USER_AGENT } },
+            { headers },
             options.timeoutMs
         );
 
         const pageResults = response.results ?? [];
         if (pageResults.length === 0) {
-            lastUnresponsive = (response.unresponsive_engines ?? []).map(([engine, reason]) => `${engine} (${reason})`);
             break;
         }
 
@@ -90,9 +95,30 @@ export async function searchSearxng(
         }
     }
 
-    if (results.length === 0 && lastUnresponsive.length > 0) {
-        throw new Error(`SearXNG returned no results; unresponsive engines: ${lastUnresponsive.join('; ')}`);
-    }
-
     return results.slice(0, limit);
+}
+
+/**
+ * Query SearXNG, retrying with a shortened query when a very long query returns
+ * nothing (Google yields no results for over-specific strings). A zero-result
+ * page is not an engine failure, so it does not trip the circuit breaker.
+ */
+export async function searchSearxng(
+    query: string,
+    limit: number,
+    options: SearxngSearchOptions
+): Promise<SearchResult[]> {
+    const words = query.trim().split(/\s+/);
+    const attempts = [query];
+    if (words.length > 8) attempts.push(words.slice(0, 8).join(' '));
+    if (words.length > 5) attempts.push(words.slice(0, 5).join(' '));
+
+    let results: SearchResult[] = [];
+    for (const attempt of attempts) {
+        results = await searchSearxngOnce(attempt, limit, options);
+        if (results.length > 0) {
+            return results;
+        }
+    }
+    return results;
 }

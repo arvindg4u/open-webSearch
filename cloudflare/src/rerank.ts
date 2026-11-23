@@ -192,5 +192,10 @@ export function rankAndDiversify(
     limit: number,
     maxPerDomain = 2
 ): RankedResult[] {
-    return diversify(rerank(query, fused), limit, maxPerDomain);
+    const ranked = rerank(query, fused);
+    // Drop results matching none of the query terms when better ones exist; this
+    // removes keyword-less junk (e.g. a portal homepage) from the output.
+    const relevant = ranked.filter((result) => result.coverage > 0);
+    const pool = relevant.length > 0 ? relevant : ranked;
+    return diversify(pool, limit, maxPerDomain);
 }

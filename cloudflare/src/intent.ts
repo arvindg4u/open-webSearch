@@ -28,14 +28,15 @@ export function detectTopic(query: string): ResolvedTopic {
 }
 
 const CLUSTERS: Record<ResolvedTopic, SupportedEngine[]> = {
-    // General web: the broad indexes.
-    general: ['duckduckgo', 'bing', 'wikipedia'],
-    // Code: authoritative repo + Q&A verticals, plus general for the long tail.
-    code: ['github', 'stackexchange', 'duckduckgo', 'bing'],
+    // General web: SearXNG (when configured) is the strongest broad index, so
+    // it leads; DuckDuckGo/Bing/Wikipedia cover the rest.
+    general: ['searxng', 'duckduckgo', 'bing', 'wikipedia'],
+    // Code: authoritative repo + Q&A verticals, plus broad indexes for the long tail.
+    code: ['github', 'stackexchange', 'searxng', 'duckduckgo', 'bing'],
     // News: discussion signal + broad indexes.
-    news: ['hackernews', 'duckduckgo', 'bing'],
-    // Academic: papers + encyclopedic background + long tail.
-    academic: ['arxiv', 'wikipedia', 'duckduckgo']
+    news: ['hackernews', 'searxng', 'duckduckgo', 'bing'],
+    // Academic: papers + encyclopedic background + broad indexes.
+    academic: ['arxiv', 'wikipedia', 'searxng', 'duckduckgo']
 };
 
 /** Pick the engine cluster for a topic, keeping only engines that are enabled. */

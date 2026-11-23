@@ -126,7 +126,10 @@ async function runEngine(engine: SupportedEngine, query: string, limit: number, 
         case 'wikipedia':
             return searchWikipedia(query, limit, { lang: readConfig(env).wikipediaLang });
         case 'searxng':
-            return searchSearxng(query, limit, { baseUrl: readConfig(env).searxngUrl || '' });
+            return searchSearxng(query, limit, {
+                baseUrl: readConfig(env).searxngUrl || '',
+                apiKey: readConfig(env).searxngApiKey
+            });
         case 'github':
             return searchGitHub(query, limit);
         case 'stackexchange':
@@ -223,7 +226,8 @@ export async function runSearch(env: Env, input: SearchInput): Promise<SearchOut
     const lists = outcomes
         .filter((outcome) => outcome.ok)
         .map((outcome) => ({ engine: outcome.engine, results: outcome.results }));
-    const fused = fuseRanked(lists, { limit: candidateLimit });
+    // Weight SearXNG above the raw scrapers so its aggregated results dominate.
+    const fused = fuseRanked(lists, { limit: candidateLimit, weights: { searxng: 3 } });
     const ranked = rankAndDiversify(query, fused, limit, maxPerDomain);
 
     const enginesWithResults = outcomes.filter((outcome) => outcome.ok && outcome.resultCount > 0).length;

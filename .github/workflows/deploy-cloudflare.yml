@@ -55,3 +55,6 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: cloudflare
           command: deploy
+          # Re-applied on every deploy so a fresh version always carries it.
+          secrets: |
+            SEARXNG_API_KEY

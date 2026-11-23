@@ -128,6 +128,7 @@ npm run typecheck
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SEARXNG_URL` | _(unset)_ | Public SearXNG base URL; enables the `searxng` engine |
+| `SEARXNG_API_KEY` | _(unset)_ | Bearer token the Worker sends to a SearXNG behind an auth proxy |
 | `WIKIPEDIA_LANG` | `en` | Wikipedia language subdomain |
 | `SEARCH_CACHE_TTL_SECONDS` | `300` | KV cache TTL; `0` disables |
 | `ALLOWED_SEARCH_ENGINES` | all available | Comma-separated allowlist |

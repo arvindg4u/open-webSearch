@@ -4,6 +4,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-13",
   "compatibility_flags": ["nodejs_compat"],
+  // Preserve bindings set outside this file (e.g. secrets) across deploys.
+  "keep_vars": true,
   "observability": {
     "logs": {
       "enabled": true
@@ -21,6 +23,11 @@
   ],
   "vars": {
     "WIKIPEDIA_LANG": "en",
-    "SEARCH_CACHE_TTL_SECONDS": "300"
+    "SEARCH_CACHE_TTL_SECONDS": "300",
+    // SearXNG is the default backend: it aggregates Google/Bing/etc. with real
+    // result quality. The URL is not a secret, so it lives here as a var (a var
+    // of the same name replaces any earlier secret of that name).
+    "DEFAULT_SEARCH_ENGINE": "searxng",
+    "SEARXNG_URL": "https://searxng.rvndha.duckdns.org"
   }
 }
