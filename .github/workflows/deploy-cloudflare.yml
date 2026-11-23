@@ -1,0 +1,57 @@
+name: Deploy Cloudflare Worker
+
+# External CI/CD for the edge MCP server in ./cloudflare, following Cloudflare's
+# documented GitHub Actions flow:
+#   https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/
+#
+# Requires two repository secrets:
+#   CLOUDFLARE_API_TOKEN   (Workers Scripts:Edit + Workers KV Storage:Edit)
+#   CLOUDFLARE_ACCOUNT_ID
+#
+# The Worker's own runtime secret (MCP_AUTH_TOKEN) is set once with
+# `wrangler secret put` and persists across deploys.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare/**'
+      - '.github/workflows/deploy-cloudflare.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cloudflare-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check and test
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cloudflare
+          command: deploy
