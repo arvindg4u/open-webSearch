@@ -3,6 +3,16 @@ import type { SearchInput, SearchQuality } from './search';
 import { runSearch } from './search';
 import { fetchPage } from './fetchPage';
 
+const UNFETCHABLE_HOSTS = /(?:^|\.)(youtube\.com|youtu\.be|facebook\.com|instagram\.com|tiktok\.com|x\.com|twitter\.com|pinterest\.com)$/i;
+
+function safeHost(url: string): string {
+    try {
+        return new URL(url).hostname.toLowerCase();
+    } catch {
+        return '';
+    }
+}
+
 /**
  * One-call evidence retrieval: search, fetch the top pages, and return their
  * Markdown under a total character budget. This is the "Tavily/Exa search with
@@ -64,11 +74,13 @@ export async function searchAndFetch(env: Env, input: SearchAndFetchInput): Prom
     // that several engines agreed on; fall back to the raw list if that leaves
     // nothing, so a degraded general-web search still returns something.
     const preferred = search.results.filter((result) => result.relevance >= 0.12 || result.engines.length > 1);
+    // Steer the fetch budget away from hosts that reliably reject server-side
+    // fetches (video / login-walled social), so evidence pages are readable.
+    const fetchable = preferred.filter((result) => !UNFETCHABLE_HOSTS.test(safeHost(result.url)));
+    const ordered = fetchable.length > 0 ? fetchable : (preferred.length > 0 ? preferred : search.results);
     // If the search is degraded and nothing actually matches the query, do not
     // waste time fetching unrelated pages. Return snippets plus the quality hint.
-    const top = search.quality.degraded && preferred.length === 0
-        ? []
-        : (preferred.length > 0 ? preferred : search.results).slice(0, fetchTop);
+    const top = search.quality.degraded && preferred.length === 0 ? [] : ordered.slice(0, fetchTop);
     const fetchedUrls = new Set(top.map((result) => result.url));
 
     // Fetch in parallel under a per-page cap, then trim to the shared budget so

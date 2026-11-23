@@ -74,6 +74,11 @@ export function authorityFor(url: string): number {
     if (host.endsWith('wikipedia.org') || host.endsWith('wikimedia.org')) return 0.82;
     if (host.endsWith('arxiv.org') || host.endsWith('acm.org') || host.endsWith('ieee.org')) return 0.86;
     if (host.endsWith('blog.cloudflare.com')) return 0.9;
+    // Video / login-walled social hosts: often unfetchable server-side, so rank
+    // them below readable articles even when their snippets match well.
+    if (host.endsWith('youtube.com') || host.endsWith('youtu.be')) return 0.35;
+    if (/(?:^|\.)(facebook|instagram|tiktok|x|twitter|pinterest)\.com$/.test(host)) return 0.3;
+    if (host.endsWith('reddit.com') || host.endsWith('quora.com')) return 0.4;
     if (host.endsWith('medium.com') || host.endsWith('substack.com') || host.endsWith('dev.to')) return 0.4;
     return 0.55;
 }
