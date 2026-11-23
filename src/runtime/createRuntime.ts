@@ -6,15 +6,18 @@ import { searchCsdn } from '../engines/csdn/csdn.js';
 import { searchDuckDuckGo } from '../engines/duckduckgo/index.js';
 import { searchExa } from '../engines/exa/index.js';
 import { searchBrave } from '../engines/brave/index.js';
-import { searchJuejin } from '../engines/juejin/index.js';
+import { searchJuejin } from '../engines/juejin/juejin.js';
 import { searchStartpage } from '../engines/startpage/index.js';
 import { searchSogou } from '../engines/sogou/index.js';
+import { searchSearxng } from '../engines/searxng/index.js';
+import { searchWikipedia } from '../engines/wikipedia/index.js';
 import { fetchLinuxDoArticle } from '../engines/linuxdo/fetchLinuxDoArticle.js';
 import { fetchCsdnArticle } from '../engines/csdn/fetchCsdnArticle.js';
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
 import { fetchGithubReadme } from '../engines/github/index.js';
 import { fetchWebContent } from '../engines/web/index.js';
-import { createSearchService, SearchEngineExecutorMap } from '../core/search/searchService.js';
+import { createSearchService, SearchEngineExecutorMap, SearchExecutionResult } from '../core/search/searchService.js';
+import { MemoryTtlCache } from '../core/search/cache.js';
 import {
     createArticleFetchService,
     createGithubReadmeService,
@@ -39,7 +42,7 @@ export type CreateOpenWebSearchRuntimeOptions = {
     dependencies?: RuntimeDependencies;
 };
 
-function createDefaultSearchExecutors(): SearchEngineExecutorMap {
+function createDefaultSearchExecutors(runtimeConfig: AppConfig): SearchEngineExecutorMap {
     return {
         baidu: searchBaidu,
         bing: searchBing,
@@ -50,19 +53,33 @@ function createDefaultSearchExecutors(): SearchEngineExecutorMap {
         brave: searchBrave,
         juejin: searchJuejin,
         startpage: searchStartpage,
-        sogou: searchSogou
+        sogou: searchSogou,
+        searxng: (query, limit) => searchSearxng(query, limit, {
+            baseUrl: runtimeConfig.searxngUrl || '',
+            categories: runtimeConfig.searxngCategories,
+            language: runtimeConfig.searxngLanguage,
+            timeRange: runtimeConfig.searxngTimeRange
+        }),
+        wikipedia: (query, limit) => searchWikipedia(query, limit, {
+            lang: runtimeConfig.wikipediaLang
+        })
     };
 }
 
 export function createOpenWebSearchRuntime(options: CreateOpenWebSearchRuntimeOptions = {}): OpenWebSearchRuntime {
     const runtimeConfig = options.config ?? config;
     const dependencies = options.dependencies ?? {};
-    const searchExecutors = dependencies.searchExecutors ?? createDefaultSearchExecutors();
+    const searchExecutors = dependencies.searchExecutors ?? createDefaultSearchExecutors(runtimeConfig);
+
+    const searchCache = new MemoryTtlCache<SearchExecutionResult>();
 
     return {
         config: runtimeConfig,
         services: {
-            search: createSearchService(searchExecutors),
+            search: createSearchService(searchExecutors, {
+                cache: searchCache,
+                cacheTtlMs: runtimeConfig.searchCacheTtlMs ?? 0
+            }),
             fetchLinuxDoArticle: createArticleFetchService('linuxdo', dependencies.fetchLinuxDoArticle ?? fetchLinuxDoArticle),
             fetchCsdnArticle: createArticleFetchService('csdn', dependencies.fetchCsdnArticle ?? fetchCsdnArticle),
             fetchJuejinArticle: createArticleFetchService('juejin', dependencies.fetchJuejinArticle ?? fetchJuejinArticle),

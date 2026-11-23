@@ -3,12 +3,29 @@ import ipaddr from 'ipaddr.js';
 
 export interface AppConfig {
     // Search engine configuration
-    defaultSearchEngine: 'bing' | 'duckduckgo' | 'exa' | 'brave' | 'baidu' | 'csdn' | 'linuxdo'  | 'juejin' | 'startpage' | 'sogou';
+    defaultSearchEngine: 'bing' | 'duckduckgo' | 'exa' | 'brave' | 'baidu' | 'csdn' | 'linuxdo'  | 'juejin' | 'startpage' | 'sogou' | 'searxng' | 'wikipedia';
     // List of allowed search engines (if empty, all engines are available)
     allowedSearchEngines: string[];
     // Search mode: request only, auto request then fallback, or force Playwright
     // Currently only affects Bing.
     searchMode: 'request' | 'auto' | 'playwright';
+    // SearXNG metasearch (self-hosted): when searxngUrl is set, the `searxng`
+    // engine routes through it and aggregates many upstream engines via one
+    // stable JSON API. Empty leaves the engine unconfigured.
+    searxngUrl?: string;
+    searxngCategories?: string;
+    searxngLanguage?: string;
+    searxngTimeRange?: 'day' | 'month' | 'year';
+    // Wikipedia search language subdomain.
+    wikipediaLang?: string;
+    // Jina Reader fallback for JS-rendered / PDF / anti-bot pages (free tier).
+    jinaReaderEnabled?: boolean;
+    jinaApiKey?: string;
+    jinaReaderBaseUrl?: string;
+    // TTL for the in-process search result cache; 0 disables caching.
+    searchCacheTtlMs?: number;
+    // When true, fetchWebContent honors robots.txt for tool-initiated fetches.
+    fetchWebRespectRobots?: boolean;
     // Proxy configuration
     proxyUrl?: string;
     useProxy: boolean;
@@ -50,6 +67,17 @@ export const config: AppConfig = {
         process.env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
         [],
     searchMode: (process.env.SEARCH_MODE as AppConfig['searchMode']) || 'auto',
+    // SearXNG + Wikipedia + Jina Reader (all keyless / free).
+    searxngUrl: readOptionalEnv('SEARXNG_URL'),
+    searxngCategories: readOptionalEnv('SEARXNG_CATEGORIES'),
+    searxngLanguage: readOptionalEnv('SEARXNG_LANGUAGE'),
+    searxngTimeRange: (process.env.SEARXNG_TIME_RANGE as AppConfig['searxngTimeRange']) || undefined,
+    wikipediaLang: readOptionalEnv('WIKIPEDIA_LANG') || 'en',
+    jinaReaderEnabled: process.env.JINA_READER_ENABLED === 'true',
+    jinaApiKey: readOptionalEnv('JINA_API_KEY'),
+    jinaReaderBaseUrl: readOptionalEnv('JINA_READER_BASE_URL'),
+    searchCacheTtlMs: Math.max(0, Number(process.env.SEARCH_CACHE_TTL_MS || 0)) || 0,
+    fetchWebRespectRobots: process.env.FETCH_WEB_RESPECT_ROBOTS === 'true',
     // Proxy configuration
     proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:7890',
     useProxy: process.env.USE_PROXY === 'true',
@@ -78,7 +106,7 @@ export const config: AppConfig = {
 };
 
 // Valid search engines list
-const validSearchEngines = ['bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'linuxdo', 'juejin', 'startpage', 'sogou'];
+const validSearchEngines = ['bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'linuxdo', 'juejin', 'startpage', 'sogou', 'searxng', 'wikipedia'];
 const validSearchModes = ['request', 'auto', 'playwright'];
 const validPlaywrightPackages = ['auto', 'playwright', 'playwright-core'];
 const quietStartupLogs = process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true';
@@ -171,6 +199,16 @@ if (!quietStartupLogs) {
         console.error(`🔍 No search engine restrictions, all available engines can be used`);
     }
     console.error(`🔍 Search mode: ${config.searchMode.toUpperCase()} (currently only affects Bing)`);
+    if (config.searxngUrl) {
+        console.error(`🔍 SearXNG instance: ${config.searxngUrl}`);
+    }
+    console.error(`🔍 Wikipedia language: ${config.wikipediaLang}`);
+    if (config.jinaReaderEnabled) {
+        console.error('🔍 Jina Reader fallback: enabled');
+    }
+    if ((config.searchCacheTtlMs ?? 0) > 0) {
+        console.error(`🔍 Search result cache TTL: ${config.searchCacheTtlMs}ms`);
+    }
 
     if (config.useProxy) {
         console.error(`🌐 Using proxy: ${config.proxyUrl}`);
