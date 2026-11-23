@@ -1,0 +1,21 @@
+# Self-hosted SearXNG for the open-websearch edge server.
+#
+# A Cloudflare Worker cannot reach this container on 127.0.0.1, so run this on a
+# public host (VPS / Fly.io / Railway) behind TLS, then set SEARXNG_URL in the
+# Worker to its public URL.
+#
+#   docker compose up -d
+#   # public URL example: https://searxng.example.com
+#   npx wrangler secret put SEARXNG_URL
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      # Set this to the public base URL the Worker will call.
+      - SEARXNG_BASE_URL=http://localhost:8888/

@@ -8,7 +8,9 @@ export const SUPPORTED_SEARCH_ENGINES = [
     'brave',
     'juejin',
     'startpage',
-    'sogou'
+    'sogou',
+    'searxng',
+    'wikipedia'
 ] as const;
 
 export type SupportedSearchEngine = typeof SUPPORTED_SEARCH_ENGINES[number];
@@ -40,6 +42,13 @@ export function normalizeEngineName(engine: string): string {
         case 'sougou':
         case '搜狗':
             return 'sogou';
+        case 'searxng':
+        case 'searx':
+        case 'searx-ng':
+            return 'searxng';
+        case 'wikipedia':
+        case 'wiki':
+            return 'wikipedia';
         default:
             return cleaned;
     }

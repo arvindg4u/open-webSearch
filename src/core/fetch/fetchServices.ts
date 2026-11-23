@@ -42,18 +42,24 @@ export function createWebFetchService(fetcher: WebFetcher) {
             url,
             maxChars,
             readability,
-            includeLinks
+            includeLinks,
+            format,
+            startIndex,
+            jinaFallback
         }: {
             url: string;
             maxChars: number;
             readability?: boolean;
             includeLinks?: boolean;
+            format?: 'text' | 'markdown';
+            startIndex?: number;
+            jinaFallback?: boolean;
         }): Promise<FetchWebContentResult> {
             if (!validatePublicWebUrl(url)) {
                 throw new Error('Invalid public HTTP(S) URL');
             }
 
-            return fetcher(url, maxChars, { readability, includeLinks });
+            return fetcher(url, maxChars, { readability, includeLinks, format, startIndex, jinaFallback });
         }
     };
 }

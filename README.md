@@ -28,6 +28,11 @@
     - juejin
     - startpage
     - sogou
+    - searxng (self-hosted metasearch; aggregates many upstream engines)
+    - wikipedia (MediaWiki search API)
+- Reciprocal rank fusion + URL de-duplication when searching several engines
+- Per-engine health and timing in search results
+- Optional TTL cache for repeated searches
 - HTTP proxy configuration support for accessing restricted resources
 - No API keys or authentication required
 - Returns structured results with titles, URLs, and descriptions
@@ -37,6 +42,9 @@
     - csdn
     - github (README files)
     - generic HTTP(S) page / Markdown content
+- LLM-friendly Markdown output with chunked reads (`startIndex` / `nextStartIndex`)
+- Optional Jina Reader fallback for JS-rendered, PDF, and anti-bot pages
+- Optional Cloudflare Workers deployment — see [`cloudflare/README.md`](./cloudflare/README.md)
 
 ## Choose the Right Path
 
@@ -48,6 +56,8 @@
   - Best when you want a reusable long-lived local HTTP service exposing `status`, `GET /health`, and `POST /search` / `POST /fetch-*`. Start it explicitly with `open-websearch serve` and check it with `open-websearch status`.
 - `Skill`
   - Best as an agent-facing guidance layer for setup and usage. A skill does not replace MCP, CLI, or the local daemon; it typically works together with the CLI and/or local daemon to help an agent discover, activate, and use the smallest working path.
+- `Cloudflare Workers`
+  - Best when you want a hosted, keyless edge endpoint with no server to run. See [`cloudflare/README.md`](./cloudflare/README.md).
 
 ## Use with a Skill
 

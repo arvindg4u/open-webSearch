@@ -3,6 +3,8 @@ import { JSDOM } from 'jsdom';
 import { config } from '../../config.js';
 import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
+import { fetchViaJinaReader, JinaReaderOptions, JinaReaderResult } from '../jina/index.js';
+import { htmlToMarkdown } from './markdown.js';
 import {
     fetchPageHtmlWithBrowser,
     getBrowserCookieHeader,
@@ -14,9 +16,13 @@ export interface FetchWebContentResult {
     finalUrl: string;
     contentType: string;
     title: string;
-    retrievalMethod: 'request' | 'request-with-browser-cookies' | 'browser-html';
+    retrievalMethod: 'request' | 'request-with-browser-cookies' | 'browser-html' | 'jina-reader';
     truncated: boolean;
     content: string;
+    /** Character offset to pass as `startIndex` to read the next chunk (chunked reads only). */
+    nextStartIndex?: number;
+    /** Total length of the extracted content before chunking. */
+    totalChars?: number;
     readabilityApplied?: boolean;
     readableHtml?: string;
     links?: ExtractedLink[];
@@ -33,6 +39,19 @@ export type ExtractedLink = {
 export type FetchWebContentOptions = {
     readability?: boolean;
     includeLinks?: boolean;
+    /**
+     * `text` (default) returns normalised plain text; `markdown` converts HTML
+     * to GitHub-flavoured Markdown so links, lists, tables and code survive.
+     */
+    format?: 'text' | 'markdown';
+    /**
+     * Character offset to start from. When set, the response is a chunk of at
+     * most `maxChars` characters with `nextStartIndex` pointing at the rest,
+     * so a long page can be read across several calls instead of being cut off.
+     */
+    startIndex?: number;
+    /** Fall back to Jina Reader for pages this server cannot render (JS-heavy, PDF, anti-bot). */
+    jinaFallback?: boolean;
 };
 
 const DEFAULT_TIMEOUT_MS = 20000;
@@ -171,6 +190,45 @@ function extractMainTextFromHtml(html: string): HtmlExtractionResult {
     }
 
     return { title, text: selectedText, mode };
+}
+
+let jinaReader: (url: string, options?: JinaReaderOptions) => Promise<JinaReaderResult> = fetchViaJinaReader;
+
+export function __setJinaReaderForTests(
+    reader?: (url: string, options?: JinaReaderOptions) => Promise<JinaReaderResult>
+): void {
+    jinaReader = reader ?? fetchViaJinaReader;
+}
+
+/**
+ * Return the inner HTML of the most article-like container, falling back to
+ * the body. Used by Markdown mode so Turndown sees structure rather than the
+ * flattened text produced for plain-text mode.
+ */
+function extractMainHtmlFromHtml(html: string): string {
+    const $ = cheerio.load(html);
+    $('script, style, noscript, template, iframe, svg, canvas').remove();
+
+    const preferredContainers = [
+        'article',
+        'main',
+        '[role="main"]',
+        '.markdown-body',
+        '.article-content',
+        '.post-content',
+        '.entry-content',
+        '.content'
+    ];
+
+    for (const selector of preferredContainers) {
+        const container = $(selector).first();
+        if (container.length > 0 && normalizeText(container.text()).length >= 120) {
+            return container.html() || '';
+        }
+    }
+
+    const body = $('body');
+    return (body.length > 0 ? body : $.root()).html() || '';
 }
 
 function extractReadableTextFromHtml(html: string): string {
@@ -461,15 +519,59 @@ export async function fetchWebContent(
         }
     }
 
+    const useJina = options.jinaFallback ?? config.jinaReaderEnabled;
+    const botChallenge = looksLikeBotChallengePage(raw);
+    if (useJina && (botChallenge || !extractedContent)) {
+        try {
+            const jinaResult = await jinaReader(parsedUrl.toString(), {
+                apiKey: config.jinaApiKey,
+                baseUrl: config.jinaReaderBaseUrl,
+                timeoutMs: DEFAULT_TIMEOUT_MS
+            });
+            const jinaContent = normalizeText(jinaResult.content || '');
+            if (jinaContent) {
+                extractedContent = jinaContent;
+                title = title || jinaResult.title || '';
+                finalUrl = jinaResult.url || finalUrl;
+                retrievalMethod = 'jina-reader';
+            }
+        } catch (error) {
+            // Only surface the Jina failure when nothing else was extracted;
+            // otherwise the local extraction is still a useful result.
+            if (!extractedContent) {
+                throw error;
+            }
+        }
+    }
+
     if (!extractedContent) {
         throw new Error('No readable content was extracted from this URL');
     }
 
+    if (
+        options.format === 'markdown'
+        && retrievalMethod !== 'jina-reader'
+        && (contentType.includes('text/html') || looksLikeHtml(raw))
+    ) {
+        const sourceHtml = readabilityApplied && readableHtml ? readableHtml : extractMainHtmlFromHtml(raw);
+        const converted = htmlToMarkdown(sourceHtml, finalUrl);
+        if (converted) {
+            extractedContent = converted;
+        }
+    }
+
     const targetMaxChars = clampMaxChars(maxChars);
-    const truncated = extractedContent.length > targetMaxChars;
+    const totalChars = extractedContent.length;
+    const startIndex = typeof options.startIndex === 'number' && options.startIndex > 0
+        ? Math.min(options.startIndex, totalChars)
+        : 0;
+    const endIndex = Math.min(startIndex + targetMaxChars, totalChars);
+    const truncated = endIndex < totalChars;
+    const nextStartIndex = truncated ? endIndex : undefined;
+    const chunk = extractedContent.slice(startIndex, endIndex);
     const content = truncated
-        ? `${extractedContent.slice(0, targetMaxChars)}\n\n[...truncated ${extractedContent.length - targetMaxChars} characters]`
-        : extractedContent;
+        ? `${chunk}\n\n[...truncated ${totalChars - endIndex} characters; continue with startIndex=${endIndex}]`
+        : chunk;
 
     return {
         url: parsedUrl.toString(),
@@ -479,6 +581,7 @@ export async function fetchWebContent(
         retrievalMethod,
         truncated,
         content,
+        ...(nextStartIndex !== undefined ? { nextStartIndex, totalChars } : {}),
         ...(options.readability ? { readabilityApplied } : {}),
         ...(readableHtml ? { readableHtml } : {}),
         ...(links ? { links } : {}),

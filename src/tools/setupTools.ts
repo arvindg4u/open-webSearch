@@ -45,7 +45,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         // 明确 auto/省略会使用服务端 SEARCH_MODE，只有 request/playwright 才是强制覆盖。
         const searchModeDescription = ' searchMode meanings: omit or set auto to use the server configured SEARCH_MODE; request forces request-based search; playwright forces browser-based search.';
         if (runtime.config.allowedSearchEngines.length === 0) {
-            return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗)) with no API key required.${searchModeDescription}`;
+            return `Search the web using multiple engines (e.g., DuckDuckGo, SearXNG, Wikipedia, Baidu, Bing, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗)) with no API key required. Multiple engines are fused with reciprocal rank fusion and de-duplicated by URL.${searchModeDescription}`;
         } else {
             const enginesText = runtime.config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -55,11 +55,15 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                         return 'Startpage';
                     case 'sogou':
                         return 'Sogou(搜狗)';
+                    case 'searxng':
+                        return 'SearXNG';
+                    case 'wikipedia':
+                        return 'Wikipedia';
                     default:
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }
             }).join(', ');
-            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}`;
+            return `Search the web using these engines: ${enginesText} (no API key required). Multiple engines are fused with reciprocal rank fusion and de-duplicated by URL.${searchModeDescription}`;
         }
     };
 
@@ -123,7 +127,9 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                             engines: searchResult.engines,
                             totalResults: searchResult.totalResults,
                             results: searchResult.results,
-                            partialFailures: searchResult.partialFailures
+                            partialFailures: searchResult.partialFailures,
+                            engineStats: searchResult.engineStats,
+                            ...(searchResult.cached ? { cached: true } : {})
                         }, null, 2)
                     }]
                 };
@@ -255,7 +261,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     // 获取通用网页/Markdown 内容工具
     server.tool(
         fetchWebToolName,
-        "Fetch content from a public HTTP(S) URL (supports Markdown files and normal web pages)",
+        "Fetch content from a public HTTP(S) URL as LLM-friendly Markdown (supports normal web pages and Markdown files). Long pages are returned as chunks: pass `startIndex` to read the next chunk.",
         {
             url: z.string().url().refine(
                 (url) => validatePublicWebUrl(url),
@@ -263,12 +269,23 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             ),
             maxChars: z.number().int().min(1000).max(200000).default(30000),
             readability: z.boolean().optional(),
-            includeLinks: z.boolean().optional()
+            includeLinks: z.boolean().optional(),
+            format: z.enum(['text', 'markdown']).default('markdown'),
+            startIndex: z.number().int().min(0).optional(),
+            jinaFallback: z.boolean().optional()
         },
-        async ({url, maxChars = 30000, readability, includeLinks}) => {
+        async ({url, maxChars = 30000, readability, includeLinks, format, startIndex, jinaFallback}) => {
             try {
                 console.error(`Fetching web content: ${url}`);
-                const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks });
+                const result = await runtime.services.fetchWeb.execute({
+                    url,
+                    maxChars,
+                    readability,
+                    includeLinks,
+                    format,
+                    startIndex,
+                    jinaFallback
+                });
 
                 return {
                     content: [{
