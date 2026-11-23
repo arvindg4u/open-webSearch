@@ -88,3 +88,11 @@ test('stripHtml and decodeHtmlEntities clean search snippets', () => {
     assert.equal(stripHtml('<b>Hello</b>&nbsp;&amp; <i>bye</i>'), 'Hello & bye');
     assert.equal(decodeHtmlEntities('a &#39;b&#39; &quot;c&quot;'), 'a \'b\' "c"');
 });
+
+test('tokenizer is Unicode-aware (Devanagari relevance)', () => {
+    const query = 'राजस्थान प्रजामंडल स्थापना';
+    const relevant = hit('searxng', 'https://example.org/a', 'राजस्थान प्रजामंडल की स्थापना', '');
+    const unrelated = hit('bing', 'https://www.microsoft.com/', 'Microsoft Official Home Page', '');
+    assert.ok(lexicalCoverage(query, relevant) >= 0.9, 'Devanagari terms should match Hindi titles');
+    assert.equal(lexicalCoverage(query, unrelated), 0, 'unrelated hit should score zero');
+});

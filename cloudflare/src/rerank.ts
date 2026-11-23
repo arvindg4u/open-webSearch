@@ -27,7 +27,9 @@ const TWO_LEVEL_SUFFIXES = new Set([
 ]);
 
 function tokenize(input: string): string[] {
-    return input.toLowerCase().match(/[a-z0-9][a-z0-9+#.-]*/g) ?? [];
+    // Unicode-aware: \p{L}/\p{N} match any script (e.g. Devanagari), not just
+    // ASCII, so non-Latin queries get real lexical relevance instead of 0.
+    return input.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}+#.-]*/gu) ?? [];
 }
 
 function hostOf(url: string): string {
