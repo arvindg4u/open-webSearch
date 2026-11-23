@@ -163,9 +163,13 @@ A Worker cannot reach a local Docker container on `127.0.0.1`, so host SearXNG
 publicly (VPS / Fly.io / Railway). A starting point is in [`searxng/`](./searxng):
 
 ```bash
-cd searxng && docker compose up -d
+cd searxng && docker compose up -d   # binds 127.0.0.1:8899 (not 8888)
 npx wrangler secret put SEARXNG_URL   # e.g. https://searxng.example.com
 ```
+
+It binds **8899**, not 8888: on hosts where a VPN/proxy toolkit uses
+`127.0.0.1:8888` as `HTTP(S)_PROXY`, occupying 8888 makes proxied TLS calls get a
+misleading 404 from SearXNG instead of a clean connection-refused.
 
 `searxng/settings.yml` enables JSON output (`search.formats: [html, json]`),
 which this Worker requires.

@@ -4,6 +4,12 @@
 # public host (VPS / Fly.io / Railway) behind TLS, then set SEARXNG_URL in the
 # Worker to its public URL.
 #
+# Port note: this binds 8899, NOT 8888. On boxes where a VPN/proxy toolkit has
+# historically used 127.0.0.1:8888 as HTTP(S)_PROXY, squatting on 8888 makes
+# every proxy'd TLS call answer with a confusing HTTP 404 from SearXNG (it has no
+# CONNECT route) instead of a clean connection-refused. Pick a port nothing else
+# uses.
+#
 #   docker compose up -d
 #   # public URL example: https://searxng.example.com
 #   npx wrangler secret put SEARXNG_URL
@@ -12,10 +18,11 @@ services:
     image: docker.io/searxng/searxng:latest
     container_name: searxng
     restart: unless-stopped
+    mem_limit: 768m
     ports:
-      - "8888:8080"
+      - "127.0.0.1:8899:8080"
     volumes:
       - ./settings.yml:/etc/searxng/settings.yml:ro
     environment:
       # Set this to the public base URL the Worker will call.
-      - SEARXNG_BASE_URL=http://localhost:8888/
+      - SEARXNG_BASE_URL=http://localhost:8899/
