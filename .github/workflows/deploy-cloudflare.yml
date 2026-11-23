@@ -56,5 +56,8 @@ jobs:
           workingDirectory: cloudflare
           command: deploy
           # Re-applied on every deploy so a fresh version always carries it.
+          # wrangler-action reads the value from the job environment, so map it.
           secrets: |
             SEARXNG_API_KEY
+        env:
+          SEARXNG_API_KEY: ${{ secrets.SEARXNG_API_KEY }}
