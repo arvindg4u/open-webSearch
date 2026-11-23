@@ -1,0 +1,28 @@
+{
+  "name": "@open-websearch/cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "description": "open-websearch edge deployment: a keyless web search + fetch MCP server on Cloudflare Workers",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
+    "types": "wrangler types --include-runtime=false"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.15",
+    "turndown": "^7.2.5",
+    "unpdf": "^0.12.2",
+    "zod": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/turndown": "^5.0.6",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.166.0"
+  }
+}
